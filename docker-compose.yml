@@ -12,7 +12,7 @@ services:
       MYSQL_PASSWORD: passwordRW
   app:
     build: .
-    image: webwork
+    image: webwork_dokuwiki_ubuntu_16
     depends_on:
       - db
       - r
@@ -25,11 +25,23 @@ services:
       - "../ww-docker-data/courses:/opt/webwork/courses"
 
       # Uncomment the line below to use local OPL for development
-      #- "../opl:/opt/webwork/libraries/webwork-open-problem-library"
+      - "../opl:/opt/webwork/libraries/webwork-open-problem-library"
       # Uncomment the line below to use local PG for development
-      #- "../pg:/opt/webwork/pg"
+      - "../pg:/opt/webwork/pg"
+      #
+      # For DokuWiki
+      - "/home/tani/DW/faq:/var/www/html/faq"
+      - "/home/tani/DW/faq_english:/var/www/html/faq_english"
+      - "/home/tani/DW/staff:/var/www/html/staff"
+      - "/home/tani/DW/test.html:/var/www/html/test.html"
+      #
+      # SSL certificates
+      #
+      - "/home/tani/WW/2016:/etc/ssl/2016"
     ports:
-      - "8080:80"
+      - "80:80"
+      - "443:443"
+    restart: always
     environment:
       DEV: 0
   r:
