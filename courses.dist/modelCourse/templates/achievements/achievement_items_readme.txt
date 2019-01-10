@@ -10,8 +10,8 @@ to have a different achievement item id.
 description of the level. 
 
 The available items are: 
-    	id : ResurrectHW
-	name : Scroll of Resurrection
+    	id : RessurectHW
+	name : Scroll of Ressurection
 	description : Opens any homework set for 24 hours.
 
 	id : ExtendDueDate
@@ -29,7 +29,7 @@ The available items are:
 	item to work,
 
 	id : DoubleSet
-	name : Cake of Enlargement
+	name : Cake of Enlargment
 	description : Cause the selected homework set to count for twice as many points as it normally would.
 
 	id : ResetIncorrectAttempts
@@ -38,7 +38,7 @@ The available items are:
 
 	id : DoubleProb
 	name : Cupcake of Enlargement
-	description : Causes a single homework problem to be worth twice as much.
+	description : Causes a single homework problem to be worth twice as much..
 	id : HalfCreditProb
 	name : Lesser Rod of Revelation
 	description : Gives half credit on a single homework problem.
