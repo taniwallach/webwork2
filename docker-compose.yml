@@ -34,10 +34,17 @@ services:
       - "/home/tani/DW/faq_english:/var/www/html/faq_english"
       - "/home/tani/DW/staff:/var/www/html/staff"
       - "/home/tani/DW/test.html:/var/www/html/test.html"
+      # Main index.html page with a redirect
+      - "/home/tani/WW/ww_local_config/index.html:/var/www/html/index.html"
+      - "/home/tani/WW/ww_local_config/htaccess:/var/www/html/.htaccess"
       #
       # SSL certificates
       #
       - "/home/tani/WW/2016:/etc/ssl/2016"
+      # Apache config
+      - "/home/tani/WW/ww_local_config/mpm_prefork.conf:/etc/apache2/mods-enabled/mpm_prefork.conf"
+
+    hostname: mathnet-faq.math.technion.ac.il
     ports:
       - "80:80"
       - "443:443"
