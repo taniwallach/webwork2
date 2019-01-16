@@ -1,32 +1,29 @@
 FROM ubuntu:16.04
 
-ENV WEBWORK_URL=/webwork2                         \
-    WEBWORK_ROOT_URL=https://mathnet-faq.math.technion.ac.il     \
-    WEBWORK_DB_HOST=db                            \
-    WEBWORK_DB_PORT=3306                          \
-    WEBWORK_DB_NAME=webwork                       \
-    WEBWORK_DB_DSN=DBI:mysql:${WEBWORK_DB_NAME}:${WEBWORK_DB_HOST}:${WEBWORK_DB_PORT} \
-    WEBWORK_DB_USER=webworkWrite                  \
-    WEBWORK_DB_PASSWORD=passwordRW                \
-    WEBWORK_SMTP_SERVER=techunix.technion.ac.il         \
+ENV PG_BRANCH=develop \
+    WEBWORK_URL=/webwork2 \
+    WEBWORK_ROOT_URL=https://mathnet-faq.math.technion.ac.il \
+    WEBWORK_DB_HOST=db \
+    WEBWORK_DB_PORT=3306 \
+    WEBWORK_DB_NAME=webwork \
+    WEBWORK_DB_USER=webworkWrite \
+    WEBWORK_DB_PASSWORD=passwordRW \
+    WEBWORK_SMTP_SERVER=techunix.technion.ac.il \
     WEBWORK_SMTP_SENDER=techdesk@mathnet.technion.ac.il \
-    WEBWORK_TIMEZONE=Asia/Jerusalem               \
-    APACHE_RUN_USER=www-data                      \
-    APACHE_RUN_GROUP=www-data                     \
-    APACHE_PID_FILE=/var/run/apache2/apache2.pid  \
-    APACHE_RUN_DIR=/var/run/apache2               \
-    APACHE_LOCK_DIR=/var/lock/apache2             \
-    APACHE_LOG_DIR=/var/log/apache2               \
-    APP_ROOT=/opt/webwork                         \
-    WEBWORK_ROOT=$APP_ROOT/webwork2               \
-    PG_ROOT=$APP_ROOT/pg                          \
+    WEBWORK_TIMEZONE=Asia/Jerusalem \
+    APACHE_RUN_USER=www-data \
+    APACHE_RUN_GROUP=www-data \
+    # temporary state file location. This might be changed to /run in Wheezy+1 \
+    APACHE_PID_FILE=/var/run/apache2/apache2.pid \
+    APACHE_RUN_DIR=/var/run/apache2 \
+    APACHE_LOCK_DIR=/var/lock/apache2 \
+    # Only /var/log/apache2 is handled by /etc/logrotate.d/apache2.
+    APACHE_LOG_DIR=/var/log/apache2 \
+    APP_ROOT=/opt/webwork \
     DEBIAN_FRONTEND=noninteractive                \
     DEBCONF_NONINTERACTIVE_SEEN=true              \
     TZ='Asia/Jerusalem'                           \
-    DEV=0                                         
-
-# Next line works only after prior values were set
-#ENV WEBWORK_DB_DSN=DBI:mysql:${WEBWORK_DB_NAME}:${WEBWORK_DB_HOST}:${WEBWORK_DB_PORT}
+    DEV=0
 
 ENV WEBWORK_DB_DSN=DBI:mysql:${WEBWORK_DB_NAME}:${WEBWORK_DB_HOST}:${WEBWORK_DB_PORT} \
     WEBWORK_ROOT=$APP_ROOT/webwork2 \
@@ -118,16 +115,14 @@ COPY VERSION /tmp
 
 
 
-# The next block would install webwork2 from Git. Disabled for developers who
-# may edit the core webwork2 codebase:
-
-#RUN WEBWORK_VERSION=`cat /tmp/VERSION|sed -n 's/.*\(develop\)'\'';/\1/p' && cat /tmp/VERSION|sed -n 's/.*\([0-9]\.[0-9]*\)'\'';/PG\-\1/p'` \
-#    && curl -fSL https://github.com/openwebwork/webwork2/archive/WeBWorK-${WEBWORK_VERSION}.tar.gz -o /tmp/WeBWorK-${WEBWORK_VERSION}.tar.gz \
-#    && tar xzf /tmp/WeBWorK-${WEBWORK_VERSION}.tar.gz \
-#    && mv webwork2-WeBWorK-${WEBWORK_VERSION} $APP_ROOT/webwork2 \
-#    && rm /tmp/WeBWorK-${WEBWORK_VERSION}.tar.gz \
-
-
+# Block to include webwork2 in the container, when needed, instead of  getting it from a bind mount.
+#    Uncomment when needed, and set the correct branch name on the following line.
+#ENV WEBWORK_BRANCH=develop   # need a valid branch name from https://github.com/openwebwork/webwork2
+#RUN curl -fSL https://github.com/openwebwork/webwork2/archive/${WEBWORK_BRANCH}.tar.gz -o /tmp/${WEBWORK_BRANCH}.tar.gz \
+#    && cd /tmp \
+#    && tar xzf /tmp/${WEBWORK_BRANCH}.tar.gz \
+#    && mv webwork2-${WEBWORK_BRANCH} $APP_ROOT/webwork2 \
+#    && rm -rf /tmp/${WEBWORK_BRANCH}.tar.gz /tmp/webwork2-${WEBWORK_BRANCH}
 
 # The next block would install the OPL from Git. Disabled for developers who
 # use an external OPL tree.
