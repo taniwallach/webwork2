@@ -129,6 +129,7 @@ if [ "$1" = 'apache2' ]; then
       if [ -f "$APP_ROOT/libraries/webwork-open-problem-library/TABLE-DUMP/OPL-tables.sql" ]; then
         echo "Restoring OPL tables from the TABLE-DUMP/OPL-tables.sql file"
         ./restore-OPL-tables
+	./update-OPL-statistics
         if [ -d $APP_ROOT/libraries/webwork-open-problem-library/JSON-SAVED ]; then
           # Restore saved JSON files
           echo "Restoring JSON files from JSON-SAVED directory"
