@@ -54,6 +54,8 @@ use WeBWorK::Debug;
 use WeBWorK::Utils qw(timeToSec readFile listFilesRecursive sortAchievements);
 use DateTime;
 use Text::CSV;
+use Encode;
+use open IO => ':encoding(UTF-8)';
 
 #constants for forms and the various handlers
 use constant BLANK_ACHIEVEMENT => "blankachievement.at";
@@ -591,7 +593,7 @@ sub score_handler {
 	    my $user_id = $userRecord->user_id;
 	    next unless $db->existsGlobalUserAchievement($user_id);
 	    next if ($userRecord->{status} eq 'D' || $userRecord->{status} eq 'A');
-	    print SCORE "$user_id, $userRecord->{last_name}, $userRecord->{first_name}, $userRecord->{section}, ";
+	    print SCORE Encode::encode("UTF-8","$user_id, $userRecord->{last_name}, $userRecord->{first_name}, $userRecord->{section}, ");
 	    my $globalUserAchievement = $db->getGlobalUserAchievement($user_id);
 	    my $level_id = $globalUserAchievement->level_achievement_id;
 	    $level_id = ' ' unless $level_id;
