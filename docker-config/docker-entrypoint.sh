@@ -59,7 +59,7 @@ if [ ! -d "$APP_ROOT/libraries/webwork-open-problem-library/OpenProblemLibrary" 
   cd $APP_ROOT/libraries/
   /usr/bin/git clone -v --progress --single-branch --branch master https://github.com/openwebwork/webwork-open-problem-library.git
 
-  # The next line forces the system to run OPL-update or load saved OPL tables below, as we just installed it
+  # The next line forces the system to run OPL-update or load saved OPL tables below, as we just installed it.  It also updates the two files with webwork problem usage statistics
   touch "$APP_ROOT/libraries/Restore_or_build_OPL_tables"
 fi
 
@@ -76,8 +76,8 @@ if [ "$1" = 'apache2' ]; then
                     -e 's/^\$database_host="localhost"/$database_host = $ENV{"WEBWORK_DB_HOST"}/' \
                     -e 's/^\$database_port="3306"/$database_port = $ENV{"WEBWORK_DB_PORT"}/' \
                     -e 's/^\$database_name="webwork"/$database_name = $ENV{"WEBWORK_DB_NAME"}/' \
-                    -e 's/database_username ="webworkWrite"/database_username =$ENV{"WEBWORK_DB_USER"}/' \
-                    -e 's/database_password ="passwordRW"/database_password =$ENV{"WEBWORK_DB_PASSWORD"}/' \
+                    -e 's/^\$database_username ="webworkWrite"/$database_username =$ENV{"WEBWORK_DB_USER"}/' \
+                    -e 's/^\$database_password ='\''passwordRW'\''/$database_password =$ENV{"WEBWORK_DB_PASSWORD"}/' \
                     -e 's/mail{smtpServer} = '\'''\''/mail{smtpServer} = $ENV{"WEBWORK_SMTP_SERVER"}/' \
                     -e 's/mail{smtpSender} = '\'''\''/mail{smtpSender} = $ENV{"WEBWORK_SMTP_SENDER"}/' \
                     -e 's/siteDefaults{timezone} = "America\/New_York"/siteDefaults{timezone} = $ENV{"WEBWORK_TIMEZONE"}/' \
@@ -85,7 +85,14 @@ if [ "$1" = 'apache2' ]; then
                     -e 's/^# $server_groupID    = '\''www-data/$server_groupID    = '\''www-data/' \
                     $WEBWORK_ROOT/conf/site.conf
             fi
+
+             if [ $i == 'localOverrides.conf' ]; then
+                sed -i \ 
+                    -e 's/# $pg{specialPGEnvironmentVars}{Rserve} = {host => "r"};/$pg{specialPGEnvironmentVars}{Rserve} = {host => "r"};/' \
+                    $WEBWORK_ROOT/conf/localOverrides.conf
+            fi
         fi
+        
     done
     # create admin course if not existing
     if [ ! -d "$APP_ROOT/courses/admin"  ]; then
@@ -96,6 +103,9 @@ if [ "$1" = 'apache2' ]; then
         $WEBWORK_ROOT/bin/addcourse admin --db-layout=sql_single --users=$WEBWORK_ROOT/courses.dist/adminClasslist.lst --professors=admin
         chown www-data:www-data -R $APP_ROOT/courses
         echo "Admin course is created."
+	#$WEBWORK_ROOT/bin/upgrade_admin_db.pl
+	#$WEBWORK_ROOT/wwsh admin ./addadmin
+	echo "user: admin password: admin added to course admin and tables upgraded"
     fi
     # modelCourses link if not existing
     if [ ! -d "$APP_ROOT/courses/modelCourse" ]; then
@@ -159,7 +169,7 @@ if [ "$1" = 'apache2' ]; then
         wait_for_db
         $WEBWORK_ROOT/bin/restore-OPL-tables.pl
         $WEBWORK_ROOT/bin/load-OPL-global-statistics.pl
-        #$WEBWORK_ROOT/bin/update-OPL-statistics.pl
+        $WEBWORK_ROOT/bin/update-OPL-statistics.pl
         if [ -d $APP_ROOT/libraries/webwork-open-problem-library/JSON-SAVED ]; then
           # Restore saved JSON files
           echo "Restoring JSON files from JSON-SAVED directory"
@@ -208,8 +218,10 @@ if [ "$1" = 'apache2' ]; then
     # This change significantly speeds up Docker startup time on production
     # servers with many files/courses (on Linux).
 
-    chown -R www-data:www-data logs tmp DATA
-    chmod -R ug+w logs tmp DATA
+    chown -R www-data:www-data logs tmp DATA 
+    chmod -R ug+w logs tmp DATA 
+    chown  www-data:www-data htdocs/tmp
+    chmod ug+w htdocs/tmp
 
     # Symbolic links which have no target outside the Docker container
     # cause problems duringt the rebuild process on some systems.
