@@ -93,6 +93,7 @@ on the same computer but does require an internet connection to a remote WeBWorK
 	# site_url        => 'http://localhost:80',
 	# form_action_url => 'http://localhost:80/webwork2/html2xml',
 	# site_password   => 'xmlrpc',
+	# forcePortNumber => '80',   # A port number to be forced, when needed.
 
     # Set the identification credential used by the "daemon_course" on the remote site
         courseID        => "daemon_course",
@@ -173,7 +174,7 @@ on the same computer but does require an internet connection to a remote WeBWorK
 	Same as -c but the question is rendered with the correct answers submitted. 
     This succeeds only if the correct answers, as determined from the answer hash, all succeed.
 
-=item	 f=s 
+=item	-f formatName
 
 	Specify the format used by the browser in displaying the question. 
          Choices for s are
@@ -182,6 +183,9 @@ on the same computer but does require an internet connection to a remote WeBWorK
          debug 
          simple
          
+=item -l lang
+
+	Set a language for the HTML rendering to use. Should use a value which would be valid for a course.
 
 =item	-v 
 
@@ -190,19 +194,26 @@ on the same computer but does require an internet connection to a remote WeBWorK
     which are (will be)  submitted to the question.
     
 =item   -e
+
 	Open the source file in an editor. 
 	
 =item   --tex
+
 	Process question in TeX mode and output to the command line
 
 =item   --pdf 
+
 	Process question in TeX mode, convert to PDF and display.
 	
+=item   --json
+
+	Process question in JSON mode and save to file
 =item   
 
 	The single letter options can be "bundled" e.g.  -vcCbB
 	
 =item  --list   pg_list
+
 	Read and process a list of .pg files contained in the file C<pg_list>.  C<pg_list>
 	consists of a sequence of lines each of which contains the full path to a pg
 	file that should be processed. (For example this might be the output from an
@@ -240,7 +251,18 @@ on the same computer but does require an internet connection to a remote WeBWorK
        Prints help information. 
        
 =item  --log 
+
        Sets path to log file
+
+=item  --seed=s     
+                 
+       Sets problemSeed to the number contained in string s
+
+=item  --psvn=s
+
+       Sets psvn to the number contained in string s
+
+
 
 =back
 =cut
@@ -258,6 +280,7 @@ BEGIN {
 }
 $ENV{MOD_PERL_API_VERSION} = 2;
 use lib "$main::dirname";
+print "home directory ".$main::dirname."\n";
 #use lib "."; # is this needed?
 
 # some files such as FormatRenderedProblem.pm may need to be in the same directory
@@ -279,13 +302,10 @@ BEGIN {
 	}
 
 }
-
-
 use lib "$WeBWorK::Constants::WEBWORK_DIRECTORY/lib";
-use lib "$WeBWorK::Constants::PG_DIRECTORY/lib";
+
 
 use Carp;
-#use Crypt::SSLeay;  # needed for https
 use LWP::Protocol::https;
 use Time::HiRes qw/time/;
 use MIME::Base64 qw( encode_base64 decode_base64);
@@ -303,49 +323,10 @@ use FormatRenderedProblem;
 use 5.10.0;
 $Carp::Verbose = 1;
 
-#############################################
-# CONFIGURE
-#
-# Configure displays for local operating system
-# This section will differ from on operating system to another
-# The default code is for the macOS and  applications commonly available on macOS.
-#############################################
-
-  
-#Default display commands.
-use constant  HTML_DISPLAY_COMMAND  => "open -a 'Google Chrome' "; # (MacOS command)
-use constant  HASH_DISPLAY_COMMAND => "";   # display tempoutputfile to STDOUT
-
-### Path to a temporary file for storing the output of sendXMLRPC.pl
- use constant  TEMPOUTPUTDIR   => "$ENV{WEBWORK_ROOT}/DATA/"; 
- die "You must make the directory ".TEMPOUTPUTDIR().
-     " writeable " unless -w TEMPOUTPUTDIR();
- use constant TEMPOUTPUTFILE  => TEMPOUTPUTDIR()."temporary_output.html";
-    
-### Default path to a temporary file for storing the output 
-### of sendXMLRPC.pl
-use constant LOG_FILE => "$ENV{WEBWORK_ROOT}/DATA/xmlrpc_results.log";
-
-### Command for editing the pg source file in the browswer
-use constant EDIT_COMMAND =>"bbedit";   # for Mac BBedit editor (used as `EDIT_COMMAND() . " $file_path")
-
-### Command for editing and viewing the tex output of the pg question.
-use constant TEX_DISPLAY_COMMAND =>"open -a 'TeXShop'";
-
-### Command for editing and viewing the tex output of the pg question.
-use constant PDF_DISPLAY_COMMAND =>"open -a 'Preview'";
-
-### set display mode
-use constant DISPLAYMODE   => 'MathJax'; 
-use constant PROBLEMSEED   => '987654321'; 
 
 ### verbose output when UNIT_TESTS_ON =1;
- our $UNIT_TESTS_ON             = 0;
+our $UNIT_TESTS_ON = 0;
 
-############################################################
-# End configure displays for local operating system
-############################################################
- 
 ############################################################
 # Read command line options
 ############################################################
@@ -361,9 +342,11 @@ my $record_ok2 = '';
 my $verbose = '';
 my $credentials_path;
 my $format = 'standard';
+my $lang = 'en';
 my $edit_source_file = '';
 my $display_tex_output='';
 my $display_pdf_output='';
+my $display_json_output='';
 my $print_answer_hash;
 my $print_answer_group;
 my $print_pg_hash;
@@ -371,36 +354,56 @@ my $print_resource_hash;
 my $print_help_message;
 my $read_list_from_this_file;
 my $path_to_log_file;
+my $problemSeed;
+my $psvn;
+
+our %credentials;
+our @path_list;
+my $credentials_string;
+
+
 GetOptions(
-	'a' 			=> \$display_ans_output1,
-	'A' 			=> \$display_ans_output2,
-	'b' 			=> \$display_html_output1,
-	'B' 			=> \$display_html_output2,
-	'h' 			=> \$display_hash_output1,
-	'H' 			=> \$display_hash_output2,
-	'c' 			=> \$record_ok1, # record_problem_ok1 needs to be written
-	'C' 			=> \$record_ok2,
-	'v' 			=> \$verbose,
-	'e' 			=> \$edit_source_file, 
-	'tex' 			=> \$display_tex_output,
-	'pdf' 			=> \$display_pdf_output,
-	'list=s' 		=>\$read_list_from_this_file,   # read file containing list of full file paths
-	'pg' 			=> \$print_pg_hash,
-	'anshash' 		=> \$print_answer_hash,
-	'ansgrp'  		=> \$print_answer_group,
+	'a' 		=> \$display_ans_output1,
+	'A' 		=> \$display_ans_output2,
+	'b' 		=> \$display_html_output1,
+	'B' 		=> \$display_html_output2,
+	'h' 		=> \$display_hash_output1,
+	'H' 		=> \$display_hash_output2,
+	'c' 		=> \$record_ok1, # record_problem_ok1 needs to be written
+	'C' 		=> \$record_ok2,
+	'v' 		=> \$verbose,
+	'e' 		=> \$edit_source_file,
+	'tex' 		=> \$display_tex_output,
+	'pdf' 		=> \$display_pdf_output,
+	'json'		=> \$display_json_output,
+	'list=s' 	=>\$read_list_from_this_file,   # read file containing list of full file paths
+	'pg' 		=> \$print_pg_hash,
+	'anshash' 	=> \$print_answer_hash,
+	'ansgrp'  	=> \$print_answer_group,
 	'resource'      => \$print_resource_hash,
-	'f=s' 			=> \$format,
+	'f=s' 		=> \$format,
+	'l=s'		=> \$lang,
 	'credentials=s' => \$credentials_path,
 	'help'          => \$print_help_message,
 	'log=s'         => \$path_to_log_file,
+	'seed=s'        => \$problemSeed,   
+	'psvn=s'	=> \$psvn,
 );
-
 
 print_help_message() if $print_help_message;
 
 ############################################################
 # End Read command line options
 ############################################################
+
+
+################################################################################
+
+# Move up the reading of credential files to here in order to get
+# WEBWORK_URL defined before it is needed. (For Docker installs when
+# called from outside Docker, it may not be in the environment variables.)
+
+
 
 ####################################################
 # get credentials
@@ -409,9 +412,11 @@ print_help_message() if $print_help_message;
 # credentials are needed
 # credentials file location -- search for one of these files 
 
-our @path_list = ("$ENV{HOME}/.ww_credentials", "$ENV{HOME}/ww_session_credentials", 'ww_credentials', 'ww_credentials.dist');
 
-my $credentials_string = <<EOF;
+@path_list = ("$ENV{HOME}/.ww_credentials", "$ENV{HOME}/ww_session_credentials", 'ww_credentials', 'ww_credentials.dist');
+
+$credentials_string = <<EOF;
+
 The credentials file should contain something like this:
 
   %credentials = (
@@ -426,6 +431,8 @@ The credentials file should contain something like this:
 	# site_url        => 'http://localhost:80',
 	# form_action_url => 'http://localhost:80/webwork2/html2xml',
 	# site_password   => 'xmlrpc',
+	# forcePortNumber => '80',   # A port number to be forced, when needed.
+
 
     # Set the identification credential used by the "daemon_course" on the remote site
         courseID        => "daemon_course",
@@ -440,7 +447,9 @@ The credentials file should contain something like this:
     # running sendXMLRPC.pl
 	# Sample settings for Mac:
 
-        # html_display_command   => "open -a 'Google Chrome' ", # A web browser
+
+  # html_display_command   => "open -a 'Google Chrome' ", # A web browser
+
 	# html_display_command   => "open -a Firefox ",
 	# tex_display_command    => "open -a 'TeXShop'",	# Editor or TeX editor
 	# pdf_display_command    => "open -a 'Preview'",	# PDF viewer
@@ -461,6 +470,12 @@ The credentials file should contain something like this:
   );
   
 EOF
+if (defined $credentials_path and (-r $credentials_path) ) {
+# we're all set
+} elsif(defined $credentials_path) { #can't find credentials
+	die  "Can't find credentials file $credentials_path searching\n";
+}
+
 
 if (defined $credentials_path and (-r $credentials_path) ) {
 		# we're all set
@@ -481,17 +496,17 @@ unless (defined $credentials_path) {
 }
 
 # verify that a credentials file has been found
-if  ( $credentials_path ) { 
-	print "Credentials taken from file $credentials_path\n" if $verbose;
+
+if  ( $credentials_path ) {
+	print STDERR "Credentials taken from file $credentials_path\n" if $verbose;
 } else {  #failed to find credentials file
 	die <<EOF;
 Can not find path for credentials. Looked in @path_list.
 $credentials_string
 ---------------------------------------------------------
 EOF
-}  
+}
 
-our %credentials;
 eval{require $credentials_path};
 if ($@  or not  %credentials) {
 	print STDERR $credentials_string;
@@ -500,19 +515,76 @@ if ($@  or not  %credentials) {
 
 foreach my $key (sort qw(site_url webwork_url form_action_url site_password userID courseID course_password )) {
 	print STDERR "$key is missing from ".
-				 "\%credentials at $credentials_path\n" unless $credentials{$key};
+
+	"\%credentials at $credentials_path\n" unless $credentials{$key};
 }
 
 # When used in the docker environment ENV{WEBWORK_URL} needs to be set
 # since that environment variable is called in site.conf
 
 
-	$ENV{WEBWORK_URL}=$ENV{WEBWORK_URL}//$credentials{webwork_url};
 
+$ENV{WEBWORK_URL}=$ENV{WEBWORK_URL}//$credentials{webwork_url};
 
 if ($verbose) {
-	foreach (sort keys %credentials){print "$_ =>$credentials{$_} \n";} 
+	foreach (sort keys %credentials){print STDERR "$_ =>$credentials{$_} \n";}
 }
+
+
+
+################################################################################
+
+
+use lib "$WeBWorK::Constants::WEBWORK_DIRECTORY/lib";
+use lib "$WeBWorK::Constants::PG_DIRECTORY/lib";
+
+use WebworkClient;
+use FormatRenderedProblem;
+#use Proc::ProcessTable; # use in standalonePGproblemRenderer
+
+use 5.10.0;
+$Carp::Verbose = 1;
+
+#############################################
+# CONFIGURE
+#
+# Configure displays for local operating system
+# This section will differ from on operating system to another
+# The default code is for the macOS and  applications commonly available on macOS.
+#############################################
+
+
+#Default display commands.
+use constant  HTML_DISPLAY_COMMAND  => "open -a 'Google Chrome' "; # (MacOS command)
+use constant  HASH_DISPLAY_COMMAND => "";   # display tempoutputfile to STDOUT
+
+### Path to a temporary file for storing the output of sendXMLRPC.pl
+ use constant  TEMPOUTPUTDIR   => "$ENV{WEBWORK_ROOT}/DATA/";
+ die "You must make the directory ".TEMPOUTPUTDIR().
+     " writeable " unless -w TEMPOUTPUTDIR();
+ use constant TEMPOUTPUTFILE  => TEMPOUTPUTDIR()."temporary_output.html";
+ 
+### Default path to a temporary file for storing the output
+### of sendXMLRPC.pl
+use constant LOG_FILE => "$ENV{WEBWORK_ROOT}/DATA/xmlrpc_results.log";
+
+### Command for editing the pg source file in the browswer
+use constant EDIT_COMMAND =>"bbedit";   # for Mac BBedit editor (used as `EDIT_COMMAND() . " $file_path")
+
+### Command for editing and viewing the tex output of the pg question.
+use constant TEX_DISPLAY_COMMAND =>"open -a 'TeXShop'";
+
+### Command for editing and viewing the tex output of the pg question.
+use constant PDF_DISPLAY_COMMAND =>"open -a 'Preview'";
+
+### set display mode
+use constant DISPLAYMODE   => 'MathJax';
+use constant PROBLEMSEED   => '987654321';
+
+############################################################
+# End configure displays for local operating system
+############################################################
+
 
 #allow credentials to overrride the default displayMode 
 #and the browser display
@@ -536,7 +608,7 @@ $path_to_log_file         = $path_to_log_file //$credentials{path_to_log_file}//
 
 eval { # attempt to create log file
 	local(*FH);
-	open(FH, '>>',$path_to_log_file) or die "Can't open file $path_to_log_file for writing";
+	open(FH, '>>:encoding(UTF-8)',$path_to_log_file) or die "Can't open file $path_to_log_file for writing";
 	close(FH);	
 };
 
@@ -552,17 +624,20 @@ die "You must first create an output file at $path_to_log_file
 ############################################
  
 my $default_input = { 
-		userID      			=> $credentials{userID}//'',
-		session_key	 			=> $credentials{session_key}//'',
-		courseID   				=> $credentials{courseID}//'',
-		courseName   			=> $credentials{courseID}//'',
-		course_password     	=> $credentials{course_password}//'',
- };
+		userID          => $credentials{userID}//'',
+		session_key     => $credentials{session_key}//'',
+		courseID        => $credentials{courseID}//'',
+		courseName      => $credentials{courseID}//'',
+		course_password => $credentials{course_password}//'',
+};
 
 my $default_form_data = { 
-		displayMode				=> $DISPLAYMODE,
-		outputformat 			=> $format//'standard',
-		problemSeed             => PROBLEMSEED(),
+		displayMode     => $DISPLAYMODE,
+		outputformat    => $format//'standard',
+		problemSeed     => $problemSeed//PROBLEMSEED(),
+		psvn            => $psvn//'23456',
+		forcePortNumber => $credentials{forcePortNumber}//'',
+		language        => $lang//'en',
 };
 
 ##################################################
@@ -601,11 +676,13 @@ if ($read_list_from_this_file) {
 		if (-d $item) {  # if the item is a directory traverse the tree
 			my $dir = abs_path($item);
 			find(\&wanted, ($dir));
+		} elsif ($item eq "-") {
+			process_pg_file($item);              # process STDIN
 		} elsif (-f $item) { # if the item is a file process it.
 			my $file_path = abs_path($item);
-			next unless $file_path =~ /\.pg$/;
-			next if $file_path =~ /\-text\.pg$/;
-			next if $file_path =~ /header/i;
+			next unless $file_path =~ /\.pg$/;   # only process pg files
+			next if $file_path =~ /\-text\.pg$/; # don't process auxiliary include files
+			next if $file_path =~ /header/i;     # don't process header files
 			process_pg_file($file_path);
 		} else {
 			print "$item cannot be found or read\n";
@@ -636,9 +713,9 @@ sub process_pg_file {
 	my $file_path = shift;
 	my $NO_ERRORS = "";
 	my $ALL_CORRECT = "";
-	my $problemSeed1 = 1112;
 	my $form_data1 = { %$default_form_data,
-					  problemSeed => $problemSeed1};
+
+					  };
 
 	if ($display_tex_output or $display_pdf_output) {
 		my $form_data2 = {
@@ -659,6 +736,19 @@ sub process_pg_file {
 	    	my $pdf_path = create_pdf_output($tex_file_name); 
 	    	system($PDF_DISPLAY_COMMAND." ".$pdf_path);	    
 	    }
+	}
+	if ($display_json_output) {
+		my $form_data2 = {
+			%$form_data1,
+			outputformat => 'json',
+			displayMode  =>'MathJax',
+		};
+		print "Creating json\n" if $UNIT_TESTS_ON;
+		my ($error_flag, $formatter, $error_string) =
+		process_problem($file_path, $default_input, $form_data2);
+		my $json_file_name = create_json_output($file_path, $formatter);
+		print( "Created JSON data in file ", TEMPOUTPUTDIR(), $json_file_name, "\n");
+		exit;
 	}
 	my ($error_flag, $formatter, $error_string) = 
 	    process_problem($file_path, $default_input, $form_data1);
@@ -744,7 +834,6 @@ sub process_pg_file {
 	} #end loop collecting correct answers. 
 	# adjust input and reinitialize form_data
 	my $form_data2 = { %$default_form_data,
-				   problemSeed => $problemSeed1,
 				   answersSubmitted => 1,
 				   WWsubmit         => 1, # grade answers
 				   WWcorrectAns          => 1, # show correct answers
@@ -788,12 +877,12 @@ sub process_problem {
 
 	### build client
 	my $xmlrpc_client = new WebworkClient (
-		url                    => $credentials{site_url},
+		site_url               => $credentials{site_url},
 		form_action_url        => $credentials{form_action_url},
-		site_password          =>  $credentials{site_password}//'',
-		courseID               =>  $credentials{courseID},
-		userID                 =>  $credentials{userID},
-		session_key            =>  $credentials{session_key}//'',
+		site_password          => $credentials{site_password}//'',
+		courseID               => $credentials{courseID},
+		userID                 => $credentials{userID},
+		session_key            => $credentials{session_key}//'',
 		sourceFilePath         => $adj_file_path,
 	);
 	
@@ -805,10 +894,13 @@ sub process_problem {
 	my $problemSeed = $form_data->{problemSeed};
 	die "problem seed not defined in sendXMLRPC::process_problem" unless $problemSeed;
 
+	
+    my $local_psvn = $form_data->{psvn}//34567;
 	my $updated_input = {%$input, 
 					  envir => $xmlrpc_client->environment(
 							   fileName       => $adj_file_path,
 							   sourceFilePath => $adj_file_path,
+							   psvn           => $local_psvn,
 							   problemSeed    => $problemSeed,),
 	};
 
@@ -871,7 +963,7 @@ sub process_problem {
 	WebworkClient::writeRenderLogEntry("", 
 	"{script:$scriptName; file:$file_path; ". 
 	sprintf("duration: %.3f sec;", $cg_duration).
-	" url: $credentials{site_url}; }",'');
+	" site_url: $credentials{site_url}; }",'');
 	
 	#######################################################################
 	# End processing of the pg file
@@ -1046,10 +1138,29 @@ sub create_tex_output {
 	$file_name =~ s/\.\w+$/\.tex/;    # replace extension with tex
 	my $output_file = TEMPOUTPUTDIR().$file_name;
 	local(*FH);
-	open(FH, '>', $output_file) or die "Can't open file $output_file for writing";
+	open(FH, '>:encoding(UTF-8)', $output_file) or die "Can't open file $output_file for writing";
 	print FH $output_text;
 	close(FH);
 	print "tex result sent to $output_file\n" if $UNIT_TESTS_ON;
+#	sleep 5;   #wait 5 seconds
+#	unlink($output_file);
+	return $file_name;
+}
+
+sub create_json_output {
+	my $file_path = shift;
+	my $formatter = shift;
+	my $output_text = $formatter->formatRenderedProblem;
+	$file_path =~s|/$||;   # remove final /
+	$file_path =~ m|/?([^/]+)$|;
+	my $file_name = $1;
+	$file_name =~ s/\.\w+$/\.json/;    # replace extension with json
+	my $output_file = TEMPOUTPUTDIR().$file_name;
+	local(*FH);
+	open(FH, '>:encoding(UTF-8)', $output_file) or die "Can't open file $output_file for writing";
+	print FH $output_text;
+	close(FH);
+	print "json result sent to $output_file\n" if $UNIT_TESTS_ON;
 #	sleep 5;   #wait 5 seconds
 #	unlink($output_file);
 	return $file_name;
@@ -1065,7 +1176,7 @@ sub	display_html_output {  #display the problem in a browser
 	$file_name =~ s/\.\w+$/\.html/;    # replace extension with html
 	my $output_file = TEMPOUTPUTDIR().$file_name;
 	local(*FH);
-	open(FH, '>', $output_file) or die "Can't open file $output_file for writing";
+	open(FH, '>:encoding(UTF-8)', $output_file) or die "Can't open file $output_file for writing";
 	print FH $output_text;
 	close(FH);
 
@@ -1154,7 +1265,7 @@ sub record_problem_ok1 {
 	}
 	 
 	local(*FH);
-	open(FH, '>>',$path_to_log_file) or die "Can't open file $path_to_log_file for writing";
+	open(FH, '>>:encoding(UTF-8)',$path_to_log_file) or die "Can't open file $path_to_log_file for writing";
 	print FH $return_string;
 	close(FH);
 	return $SHORT_RETURN_STRING;
@@ -1177,7 +1288,7 @@ sub record_problem_ok2 {
 	$all_correct = ".5" if $some_correct_answers_not_specified;
 	$ALL_CORRECT = ($all_correct == 1)?'All answers are correct':'Some answers are incorrect';
 	local(*FH);
-	open(FH, '>>',$path_to_log_file) or die "Can't open file $path_to_log_file for writing";
+	open(FH, '>>:encoding(UTF-8)',$path_to_log_file) or die "Can't open file $path_to_log_file for writing";
 	print FH "$all_correct $file_path\n"; #  do we need this? compile_errors=$error_flag\n";
 	close(FH);
 	return $ALL_CORRECT;
@@ -1212,12 +1323,24 @@ sub edit_source_file {
 sub get_source {
 	my $file_path = shift;
 	my $source;	
-	die "Unable to read file $file_path \n" unless -r $file_path;
+	die "Unable to read file $file_path \n" unless $file_path eq '-' or -r $file_path;
 	eval {  #File::Slurp would be faster (see perl monks)
 		 local $/=undef;
-  		open(FH, '<',$file_path) or die "Couldn't open file $file_path: $!";
-		$source   = <FH>; #slurp  input
-  		close FH;
+		if ($file_path eq '-') {
+			$source = <STDIN>;
+		} else {
+			# To support proper behavior with UTF-8 files, we need to open them with "<:encoding(UTF-8)"
+			# as otherwise, the first HTML file will render properly, but when "Preview" "Submit answer"
+			# or "Show correct answer" is used it will make problems, as in process_problem() the
+			# encodeSource() method is called on a data which is still UTF-8 encoded, and leads to double
+			# encoding and gibberish.
+			# NEW:
+			open(FH, "<:encoding(UTF-8)" ,$file_path) or die "Couldn't open file $file_path: $!";
+			# OLD:
+			#open(FH, "<" ,$file_path) or die "Couldn't open file $file_path: $!";
+			$source   = <FH>; #slurp  input
+			close FH;
+		}
 	};
 	die "Something is wrong with the contents of $file_path\n" if $@;
 	### adjust file_path so that it is relative to the rendering course directory
@@ -1316,12 +1439,12 @@ DETAILS
         or create a file with this information and specify it with the --credentials option.
     
             %credentials = (
-                            userID                 => "my login name for the webwork course",
-                            course_password        => "my password ",
-                            courseID               => "the name of the webwork course",
-                  XML_URL                  => "url of rendering site
-                  XML_PASSWORD          => "site password" # preliminary access to site
-                  $FORM_ACTION_URL      =  'http://localhost:80/webwork2/html2xml'; #action url for form
+                  userID                 => "my login name for the webwork course",
+                  course_password        => "my password ",
+                  courseID               => "the name of the webwork course",
+                  SITE_URL               => "url of rendering site",
+                  XML_PASSWORD           => "site password", # preliminary access to site
+                  form_action_url        => 'http://localhost:80/webwork2/html2xml' #action url for form
             );
 
   Options
@@ -1361,32 +1484,29 @@ DETAILS
                  simple
 
     -v
-                Verbose output. Used mostly for debugging. 
-                 In particular it displays explicitly the correct answers which are (will be)  submitted to the question.
+                 Verbose output. Used mostly for debugging. 
+                 In particular it displays explicitly the correct answers which are (will be)  
+                 submitted to the question and it specifies which credential file is used.
 
     -e
-				Open the source file in an editor. 
 
-	
-                The single letter options can be "bundled" e.g.  -vcCbB
-   
-   	--tex    
-				Process question in TeX mode and output to the command line
-             
+                 Open the source file in an editor. 
+                 The single letter options can be "bundled" e.g.  -vcCbB
+    --tex    
+                 Process question in TeX mode and output to the command line
     --pdf          
-				Process question in TeX mode, then by pdflatex and output 
-				to the command line
+                 Process question in TeX mode, then by pdflatex and output 
+                 to the command line
  
-	--list   pg_list
-				Read and process a list of .pg files contained in the file C<pg_list>.  C<pg_list>
-				consists of a sequence of lines each of which contains the full path to a pg
-				file that should be processed. (For example this might be the output from an
-				earlier run of sendXMLRPC using the -c flag. )
+    --list       pg_list
+                 Read and process a list of .pg files contained in the file C<pg_list>.  C<pg_list>
+                 consists of a sequence of lines each of which contains the full path to a pg
+                 file that should be processed. (For example this might be the output from an
+                 earlier run of sendXMLRPC using the -c flag. )
 
     --pg
                 Triggers the printing of the all of the variables available to the PG question. 
                 The table appears within the question content. Use in conjunction with -b or -B.
-
     --anshash
                 Prints the answer hash for each answer in the PG_debug output which appears below
                 the question content. Use in conjunction with -b or -B. 
@@ -1397,20 +1517,25 @@ DETAILS
                 Prints the PGanswergroup for each answer evaluator. The information appears in 
                 the PG_debug output which follows the question content.  Use in conjunction with -b or -B.
                 This contains more information than printing the answer hash. (perhaps too much).
-	
-	--resource
 
-	Prints the resources used by the question. The information appears in 
-    the PG_debug output which follows the question content.  Use in conjunction with -b or -B.
+    --resource
+
+                 Prints the resources used by the question. The information appears in 
+                 the PG_debug output which follows the question content.  Use in conjunction with -b or -B.
+
 
     --credentials=s
-                Specifies a file s where the  credential information can be found.
+    
+                 Specifies a file s where the  credential information can be found.
 
-	--help
-		   Prints help information. 
-	   
-	--log 
-		   Sets path to log file
+    --help
+                 Prints help information. 
+
+    --log 
+                 Sets path to log file
+    
+    --seed=s     
+                 Sets problemSeed to the number contained in string s
 
 
 EOT

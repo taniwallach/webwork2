@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/Utils/CourseManagement.pm,v 1.48 2009/10/01 21:28:46 gage Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -83,7 +83,46 @@ Lists the courses defined.
 sub listCourses {
 	my ($ce) = @_;
 	my $coursesDir = $ce->{webworkDirs}->{courses};
-	return grep { not (m/^\./ or m/^CVS$/) and -d "$coursesDir/$_" } readDirectory($coursesDir);
+
+	# We connect to the database and collect table names which end in "_user":
+	my $dbh = DBI->connect(
+		$ce->{database_dsn},
+		$ce->{database_username},
+		$ce->{database_password},
+		{
+			PrintError => 0,
+			RaiseError => 1,
+		},
+        );
+
+	my $dbname = ${ce}->{database_name};
+	my $stmt_bad = 0;
+	my $stmt = $dbh->prepare("show tables") or ( $stmt_bad = 1 );
+	my %user_tables_seen; # Will also include problem_user, set_user, achievement_user, set_locations_user
+	if ( ! $stmt_bad ) {
+		$stmt->execute() or ( $stmt_bad = 1 );
+		my @row;
+		while (@row = $stmt->fetchrow_array) {
+			if ( $row[0] =~  /_user$/ ) {
+				$user_tables_seen{ $row[0] } = 1;
+			}
+		}
+		$stmt->finish();
+	}
+	$dbh->disconnect();
+
+	# Collect directories which may be course directories
+	my @cdirs = grep { not (m/^\./ or m/^CVS$/) and -d "$coursesDir/$_" } readDirectory($coursesDir);
+	if ( $stmt_bad ) {
+		# Fall back to old method listing all directories.
+		return @cdirs;
+	} else {
+		my @courses;
+		foreach my $cname ( @cdirs ) {
+			push(@courses,$cname) if $user_tables_seen{"${cname}_user"};
+		}
+		return @courses;
+	}
 }
 
 =item listArchivedCourses($ce)
@@ -189,6 +228,10 @@ sub addCourse {
 	croak "Invalid characters in course ID: '$courseID' (valid characters are [-A-Za-z0-9_])"
 		unless $courseID =~ m/^[-A-Za-z0-9_]*$/;
 	
+	# fail if requested course ID is too long
+	croak "Course ID cannot exceed " . $ce->{maxCourseIdLength} . " characters."
+		if ( length($courseID) > $ce->{maxCourseIdLength} );
+
 	# if we didn't get a database layout, use the default one
 	if (not defined $dbLayoutName) {
 		$dbLayoutName = $ce->{dbLayoutName};
@@ -279,7 +322,7 @@ sub addCourse {
 	##### step 4: write course.conf file #####
 	
 	my $courseEnvFile = $ce->{courseFiles}->{environment};
-	open my $fh, ">", $courseEnvFile
+	open my $fh, ">:utf8", $courseEnvFile
 		or die "failed to open $courseEnvFile for writing.\n";
 	writeCourseConf($fh, $ce, %courseOptions);
 	close $fh;
@@ -323,6 +366,23 @@ sub addCourse {
 		} else {
 			warn "Failed to copy html from course '$sourceCourse': html directory '$sourceDir' does not exist.\n";
 		}
+		## copy config files ##
+		#  this copies the simple.conf file if desired
+		if (exists $options{copySimpleConfig}) {
+			my $sourceFile = $sourceCE->{courseFiles}->{simpleConfig};
+			if (-e $sourceFile) {
+				my $destFile = $ce->{courseFiles}{simpleConfig};
+				my $cp_cmd = join(" ", ("2>&1", $ce->{externalPrograms}{cp}, shell_quote($sourceFile), shell_quote($destFile)));
+				my $cp_out = readpipe $cp_cmd;
+				if ($?) {
+					my $exit = $? >> 8;
+					my $signal = $? & 127;
+					my $core = $? & 128;
+					warn "Failed to copy simple.conf from course '$sourceCourse' with command '$cp_cmd' (exit=$exit signal=$signal core=$core): $cp_out\n";
+				}
+			}
+		}
+
 	}
 	######## set 6: copy html/achievements contents ##############
 }
@@ -400,6 +460,10 @@ sub renameCourse {
 	if (-e $newCourseDir) {
 		croak "$newCourseID: course exists";
 	}
+
+	# fail if the target courseID is too long
+	croak "New course ID cannot exceed " . $oldCE->{maxCourseIdLength} . " characters."
+		if ( length($newCourseID) > $oldCE->{maxCourseIdLength} );
 	
 	# fail if the source course does not exist
 	unless (-e $oldCourseDir) {
@@ -821,6 +885,11 @@ sub unarchiveCourse {
 		die "Cannot overwrite existing course $coursesDir/$newCourseID";
 	}
 	
+	# fail if the target courseID is too long
+	croak "New course ID cannot exceed " . $ce->{maxCourseIdLength} . " characters."
+		if ( length($newCourseID) > $ce->{maxCourseIdLength} );
+
+
 	##### step 1: move a conflicting course away #####
 	
 	# if this function returns undef, it means there was no course in the way
@@ -1076,6 +1145,8 @@ sub unarchiveCourseHelper {
 Perform database-layout specific operations for initializing non-native database tables
 that are not associated with a particular course
 
+=back
+
 =cut
 
 sub initNonNativeTables {
@@ -1179,14 +1250,13 @@ sub callHelperIfExists {
 	}
 }
 
-=over
-
 =item getHelperRef($helperName, $dbLayoutName)
 
 Call a database-specific helper function, if a database-layout specific helper
 class exists and contains a function named "${helperName}Helper".
 
 =cut
+
 sub getHelperRef {
 	my ($helperName, $dbLayoutName) = @_;
 	
@@ -1235,6 +1305,8 @@ Writes a course.conf file to $fh, a file handle, using defaults from the course
 environment object $ce and overrides from %options. %options can contain any of
 the pairs accepted in %courseOptions by addCourse(), above.
 
+=back
+
 =cut
 
 sub writeCourseConf {
@@ -1247,7 +1319,7 @@ sub writeCourseConf {
 #!perl
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright 2000-2016 The WeBWorK Project, http://openwebwork.sf.net/
 # 
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of either: (a) the GNU General Public License as published by the

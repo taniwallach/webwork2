@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/ContentGenerator/Instructor/ShowAnswers.pm,v 1.20 2006/10/10 10:58:54 dpvc Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -210,7 +210,7 @@ sub initialize {
 
 	    $filename .= '.csv';
 
-	    open my $fh, ">", $fullFilename or warn "Unable to open $fullFilename for writing";
+	    open my $fh, ">:utf8", $fullFilename or warn "Unable to open $fullFilename for writing";
 
 	    my $csv = Text::CSV->new({"eol"=>"\n"});
 	    my @columns;
@@ -274,13 +274,9 @@ sub body {
 	
 	my $showAnswersPage   = $urlpath->newFromModule($urlpath->module,  $r, courseID => $courseName);
 	my $showAnswersURL    = $self->systemLink($showAnswersPage,authen => 0 );
-	my $renderAnswers = 0;
-	# Figure out if MathJax is available
-	if ((grep(/MathJax/,@{$ce->{pg}->{displayModes}}))) {
-	    print CGI::start_script({type=>"text/javascript", src=>"$ce->{webworkURLs}->{MathJax}"}), CGI::end_script();
-	    $renderAnswers = 1;
-	}
 
+	# Figure out if MathJax is available
+	my $renderAnswers = scalar(grep(/MathJax/, @{$ce->{pg}->{displayModes}}));
 
 	my $prettyProblemNumbers = $self->{prettyProblemNumbers};
 
@@ -463,7 +459,7 @@ sub body {
 
 	      my $previousTime = -1;
 
-	      print CGI::start_table({class=>"past-answer-table", border=>0,cellpadding=>0,cellspacing=>3,align=>"center"});
+	      print CGI::start_table({class=>"past-answer-table", border=>0,cellpadding=>0,cellspacing=>3,align=>"center", dir=>"ltr"}); # The answers are not well formatted in RTL mode
 	      
 	      foreach my $answerID (@pastAnswerIDs) {
 		$foundMatches = 1 unless $foundMatches;
@@ -541,32 +537,10 @@ sub body {
 	  }
 	}
       	      
-	
-
-
-	
-	if ($renderAnswers) {
-	  print <<EOS;
-	    <script type="text/javascript">
-		MathJax.Hub.Register.StartupHook('AsciiMath Jax Config', function () {
-		    var AM = MathJax.InputJax.AsciiMath.AM;
-		    for (var i=0; i< AM.symbols.length; i++) {
-			if (AM.symbols[i].input == '**') {
-			    AM.symbols[i] = {input:"**", tag:"msup", output:"^", tex:null, ttype: AM.TOKEN.INFIX};
-			}
-		    }
-						 });
-	    MathJax.Hub.Config(["input/Tex","input/AsciiMath","output/HTML-CSS"]);
-	    
-	    MathJax.Hub.Queue([ "Typeset", MathJax.Hub, "past-answer-table"]);
-	    </script>
-EOS
-	}
-	
 	print CGI::h2($r->maketext('No problems matched the given parameters.')) unless $foundMatches;
 
 	return "";
-      }
+}
 
 sub byData {
   my ($A,$B) = ($a,$b);
@@ -613,7 +587,6 @@ sub output_JS {
 
     my $site_url = $ce->{webworkURLs}->{htdocs};
     
-    print CGI::start_script({type=>"text/javascript", src=>"$site_url/js/apps/AddOnLoad/addOnLoadEvent.js"}), CGI::end_script();
     print CGI::start_script({type=>"text/javascript", src=>"$site_url/js/apps/ShowHide/show_hide.js"}), CGI::end_script();
 
     return "";

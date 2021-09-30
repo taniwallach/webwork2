@@ -122,7 +122,6 @@ eval "use lib '$pg_dir/lib'"; die $@ if $@;
 
 require Apache::WeBWorK; # force compilation of pretty much everything
 
-
 # At this point, the following configuration variables should be present for use
 # in wiring WeBWorK into Apache:
 # 

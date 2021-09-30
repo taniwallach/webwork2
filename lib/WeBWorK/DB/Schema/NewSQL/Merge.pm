@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/DB/Schema/NewSQL/Merge.pm,v 1.11 2007/03/02 23:26:30 sh002i Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -124,7 +124,7 @@ sub sql_init {
 	my $self = shift;
 	
 	# transformation functions for table and field names: these allow us to pass
-	# the WeBWorK table/field names to SQL::Abstract, and have it translate them
+	# the WeBWorK table/field names to SQL::Abstract::Classic, and have it translate them
 	# to the SQL table/field names from tableOverride and fieldOverride.
 	# (Without this, it would be hard to translate field names in WHERE
 	# structures, since they're so convoluted.)

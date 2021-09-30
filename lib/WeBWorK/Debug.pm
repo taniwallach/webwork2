@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/Debug.pm,v 1.10 2006/06/28 16:20:39 sh002i Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -116,9 +116,9 @@ sub debug {
 		my $date = time2str("%a %b %d %H:%M:%S.$msec %Y", $sec);
 		my $finalMessage = "[$date] $subroutine: " . join("", @message);
 		$finalMessage .= "\n" unless $finalMessage =~ m/\n$/;
-		
+
 		if ($WeBWorK::Debug::Logfile ne "") {
-			if (open my $fh, ">>", $Logfile) {
+			if (open my $fh, ">>:encoding(UTF-8)", $Logfile) {
 				print $fh $finalMessage;
 				close $fh;
 			} else {

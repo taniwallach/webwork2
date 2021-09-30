@@ -1,7 +1,7 @@
 
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright � 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/Utils.pm,v 1.83 2009/07/12 23:48:00 gage Exp $
 #
 # This program is free software; you can redistribute it and/or modify it under
@@ -34,12 +34,16 @@ use Date::Format;
 use File::Copy;
 use File::Spec::Functions qw(canonpath);
 use Time::Zone;
-use MIME::Base64;
+use MIME::Base64 qw(encode_base64 decode_base64);
 use Errno;
 use File::Path qw(rmtree);
 use Storable;
 use Carp;
 #use Mail::Sender;
+use Storable qw(nfreeze thaw);
+use JSON;
+
+use open IO => ':encoding(UTF-8)';
 
 use constant MKDIR_ATTEMPTS => 10;
 
@@ -68,8 +72,10 @@ our @EXPORT_OK = qw(
 	constituency_hash
 	cryptPassword
 	decodeAnswers
+        decode_utf8_base64
 	dequote
 	encodeAnswers
+        encode_utf8_base64
 	fisher_yates_shuffle
 	formatDateTime
 	has_aux_files
@@ -78,6 +84,7 @@ our @EXPORT_OK = qw(
 	listFilesRecursive
 	makeTempDirectory
 	max
+        nfreeze_base64
 	not_blank
 	parseDateTime
 	path_is_subdir
@@ -93,6 +100,7 @@ our @EXPORT_OK = qw(
 	textDateTime
 	timeToSec
 	trim_spaces
+        thaw_base64
 	undefstr
 	writeCourseLog
 	writeLog
@@ -108,6 +116,8 @@ our @EXPORT_OK = qw(
         is_jitar_problem_closed
         jitar_problem_adjusted_status
         jitar_problem_finished
+	fetchEmailRecipients
+	generateURLs
 	x
 );
 
@@ -179,11 +189,40 @@ sub force_eoln($) {
 
 sub readFile($) {
 	my $fileName = shift;
+	# debugging code: found error in CourseEnvironment.pm with this
+# 	if ($fileName =~ /___/ or $fileName =~ /the-course-should-be-determined-at-run-time/) {
+# 		print STDERR "File $fileName not found.\n Usually an unnecessary call to readFile from\n",
+# 		join("\t ", caller()), "\n";
+# 		return();
+# 	}
 	local $/ = undef; # slurp the whole thing into one string
-	open my $dh, "<", $fileName
-		or croak "failed to read file $fileName: $!";
-	my $result = <$dh>;
-	close $dh;
+	my $result='';  # need this initialized because the file (e.g. simple.conf) may not exist
+	if (-r $fileName) {
+		eval{
+			# CODING WARNING:
+			# if (open my $dh, "<", $fileName){
+			# will cause a utf8 "\xA9" does not map to Unicode warning if © is in latin-1 file
+			# use the following instead
+			if (open my $dh, "<:raw", $fileName){
+				$result = <$dh>;
+				Encode::decode("UTF-8",$result) or die "failed to decode $fileName";
+				close $dh;
+			} else {
+				print STDERR "File $fileName cannot be read."; # this is not a fatal error.
+			}
+		};
+		if ($@) {
+			print STDERR "reading $fileName:  error in Utils::readFile: $@\n";
+		}
+		my $prevent_error_message = utf8::decode($result) or warn join("",
+			"Non-fatal warning: file $fileName contains at least one character code which ",
+			"is not valid in UTF-8. (The copyright sign is often a culprit -- use '&amp;copy;' instead.)\n",
+			"While this is not fatal you should fix it\n");
+		# FIXME
+		# utf8::decode($result) raises an error about the copyright sign
+		# decode_utf8 and Encode::decode_utf8 do not -- which is doing the right thing?
+	}
+	# returns the empty string if the file cannot be read
 	return force_eoln($result);
 }
 
@@ -533,74 +572,75 @@ sub parseDateTime($;$) {
 		}
 	}
 
-	my $epoch;
+	my $epoch; # The value we need to calculate and return
 
+	# Determine the best possible time-zone string to use in the (first) call to DateTime()
+	my $tz_to_use = $display_tz;
+	my $is_valid_zone_name = 1; # when later set to 0, we will try the "offset" approach
 	if (defined $zone and $zone ne "") {
-		if (DateTime::TimeZone->is_valid_name($zone)) {
-			#warn "\t\$zone is valid according to DateTime::TimeZone\n";
-
-			my $dt = new DateTime(
-				year      => $year,
-				month     => $month,
-				day       => $day,
-				hour      => $hour,
-				minute    => $minute,
-				second    => $second,
-				time_zone => $zone,
-			);
-			#warn "\t\$dt = ", $dt->strftime(DATE_FORMAT), "\n";
-
-			$epoch = $dt->epoch;
-			#warn "\t\$dt->epoch = $epoch\n";
+		$is_valid_zone_name = DateTime::TimeZone->is_valid_name($zone);
+		if ( $is_valid_zone_name ) {
+			#warn "\t\$zone=$zone is valid according to DateTime::TimeZone\n";
+			$tz_to_use = $zone;
 		} else {
-			#warn "\t\$zone is invalid according to DateTime::TimeZone, so we ask Time::Zone\n";
-
-			# treat the date/time as UTC
-			my $dt = new DateTime(
-				year      => $year,
-				month     => $month,
-				day       => $day,
-				hour      => $hour,
-				minute    => $minute,
-				second    => $second,
-				time_zone => "UTC",
-			);
-			#warn "\t\$dt = ", $dt->strftime(DATE_FORMAT), "\n";
-
-			# convert to an epoch value
-			my $utc_epoch = $dt->epoch
-				or die "Date/time '$string' not representable as an epoch. Get more bits!\n";
-			#warn "\t\$utc_epoch = $utc_epoch\n";
-
-			# get offset for supplied timezone and utc_epoch
-			my $offset = tz_offset($zone, $utc_epoch) or die "Time zone '$zone' not recognized.\n";
-			#warn "\t\$zone is valid according to Time::Zone (\$offset = $offset)\n";
-
-			#$epoch = $utc_epoch + $offset;
-			##warn "\t\$epoch = \$utc_epoch + \$offset = $epoch\n";
-
-			$dt->subtract(seconds => $offset);
-			#warn "\t\$dt - \$offset = ", $dt->strftime(DATE_FORMAT), "\n";
-
-			$epoch = $dt->epoch;
-			#warn "\t\$epoch = $epoch\n";
+			#warn "\t\$zone=$zone is invalid according to DateTime::TimeZone, so we will attempt to treat the date/time as UTC and then apply an offset for the zone $zone.\n";
+			$tz_to_use = "UTC";
+			# When the offset approach fails, we will overriden again and use $display_tz instead
 		}
 	} else {
 		#warn "\t\$zone not supplied, using \$display_tz\n";
+		$tz_to_use = $display_tz;
+	}
 
-		my $dt = new DateTime(
-			year      => $year,
-			month     => $month,
-			day       => $day,
-			hour      => $hour,
-			minute    => $minute,
-			second    => $second,
-			time_zone => $display_tz,
-		);
-		#warn "\t\$dt = ", $dt->strftime(DATE_FORMAT), "\n";
+	my $dt = new DateTime(
+		year      => $year,
+		month     => $month,
+		day       => $day,
+		hour      => $hour,
+		minute    => $minute,
+		second    => $second,
+		time_zone => $tz_to_use,
+	);
+	my @offset_approach_msg = (); # Will be non-empty and collect parts for warn message when needed
+	if ( ! $is_valid_zone_name ) {
+		# We used "UTC" and need to do an offset, or fail to a different approach
 
-		$epoch = $dt->epoch;
-		#warn "\t\$epoch = $epoch\n";
+		# convert to an epoch value
+		my $utc_epoch = $dt->epoch
+			or die "Date/time '$string' not representable as an epoch. Get more bits!\n";
+		push( @offset_approach_msg, "\t\$utc_epoch = $utc_epoch\n" );
+
+		# get offset for supplied timezone and utc_epoch
+		# fall back to $display_tz if that fails
+		my $offset;
+		if( $offset = tz_offset($zone, $utc_epoch) ) {
+			push( @offset_approach_msg, "\t\$zone is valid according to Time::Zone (\$offset = $offset)\n");
+
+			$epoch = $utc_epoch + $offset;
+			push( @offset_approach_msg, "\t\$epoch = \$utc_epoch + \$offset = $epoch\n");
+
+			$dt->subtract(seconds => $offset);
+			push( @offset_approach_msg, "\t\$dt - \$offset = " . $dt->strftime(DATE_FORMAT) . "\n");
+		} else {
+			@offset_approach_msg = (); # Offset approach failed
+			warn "Time zone '$zone' not recognized, falling back to parsing using $display_tz instead of applying an offset from UTC.\n";
+			$dt = new DateTime(
+				year      => $year,
+				month     => $month,
+				day       => $day,
+				hour      => $hour,
+				minute    => $minute,
+				second    => $second,
+				time_zone => $display_tz,
+			);
+		}
+	}
+	$epoch = $dt->epoch;
+
+	if ( @offset_approach_msg ) {
+		#warn join("", @offset_approach_msg);
+	} else {
+		#warn "\t\$dt = ", $dt->strftime(DATE_FORMAT), "\n\t\$dt->epoch = $epoch\n";
 	}
 
 	return $epoch;
@@ -777,7 +817,7 @@ sub writeCourseLog($$@) {
 	my $logFile = $ce->{courseFiles}->{logs}->{$facility};
 	surePathToFile($ce->{courseDirs}->{root}, $logFile);
 	local *LOG;
-	if (open LOG, ">>", $logFile) {
+	if (open LOG, ">>:utf8", $logFile) {
 		print LOG "[", time2str("%a %b %d %H:%M:%S %Y", time), "] @message\n";
 		close LOG;
 	} else {
@@ -806,7 +846,7 @@ sub writeTimingLogEntry($$$$) {
 sub trim_spaces {
 	my $in = shift;
 	return '' unless $in;  # skip blank spaces
-	$in =~ s/^\s*(.*?)\s*$/$1/;
+	$in =~ s/^\s*|\s*$//g;
 	return($in);
 }
 sub list2hash(@) {
@@ -876,7 +916,7 @@ our $BASE64_ENCODED = 'base64_encoded:';
 #  statements
 
 
-sub decodeAnswers($) {
+sub OLDdecodeAnswers($) {
 	my $serialized = shift;
 	return unless defined $serialized and $serialized;
 	my $array_ref = eval{ Storable::thaw($serialized) };
@@ -888,8 +928,24 @@ sub decodeAnswers($) {
 		return @{$array_ref};
 	}
 }
+sub decodeAnswers($) {
+	my $serialized = shift;
+	return unless defined $serialized and $serialized;
+	if ( $serialized =~ /^\[/ && $serialized =~ /\]$/) {
+		# Assuming this is JSON encoded
+		my @array_data = @{from_json($serialized)};
+		return @array_data;
+	} else {
+		# Fall back to old Storable::thaw based code
+		return OLDdecodeAnswers($serialized);
+	}
+}
 
-sub encodeAnswers(\%\@) {
+sub decode_utf8_base64 {
+    return Encode::decode("UTF-8",decode_base64(shift));
+}
+
+sub OLD_encodeAnswers(\%\@) {
 	my %hash = %{shift()};
 	my @order = @{shift()};
 	my @ordered_hash = ();
@@ -897,11 +953,41 @@ sub encodeAnswers(\%\@) {
 		push @ordered_hash, $key, $hash{$key};
 	}
 	return Storable::nfreeze( \@ordered_hash);
-
+}
+sub encodeAnswers(\%\@) {
+	my %hash = %{shift()};
+	my @order = @{shift()};
+	my @ordered_hash = ();
+	foreach my $key (@order) {
+		push @ordered_hash, $key, $hash{$key};
+	}
+	return to_json(\@ordered_hash);
 }
 
+sub encode_utf8_base64 {
+    return encode_base64(Encode::encode("UTF-8",shift));
+}
 
+sub nfreeze_base64 {
+    return encode_base64(nfreeze(shift));
+}
 
+sub thaw_base64 {
+    my $string = shift;
+    my $result;
+
+    eval {
+	$result = thaw(decode_base64($string));
+    };
+
+    if ($@) {
+	warn("Deleting corrupted achievement data.");
+	return {};
+    } else {
+	return $result;
+    }
+
+}
 sub max(@) {
 	my $soFar;
 	foreach my $item (@_) {
@@ -937,7 +1023,7 @@ sub cryptPassword($) {
 	    $salt .= ('.','/','0'..'9','A'..'Z','a'..'z')[rand 64];
 	}
 
-	my $cryptPassword = crypt($clearPassword, $salt);
+	my $cryptPassword = crypt(trim_spaces($clearPassword), $salt);
 	return $cryptPassword;
 }
 
@@ -1626,6 +1712,102 @@ sub jitar_problem_finished {
 
     # if we got here then the problem is finished
     return 1;
+}
+
+# requires a CG object, and a permission type
+# a user may also be submitted, in case we need to filter by section
+# could require the db, course environment and authz separately... why tho?
+
+sub fetchEmailRecipients {
+	my ($self, $permissionType, $sender) = @_; # sender argument is optional
+	my $r = $self->r;
+	my $db = $r->db;
+	my $ce = $r->ce;
+	my $authz = $r->authz;
+	my @recipients;
+
+  return unless $permissionType;
+
+	foreach my $potentialRecipient ($db->listUsers()) {
+		if ($authz->hasPermissions($potentialRecipient, $permissionType)) {
+			my $validRecipient = $db->getUser($potentialRecipient);
+			next if $ce->{feedback_by_section} and defined $sender
+					and defined $validRecipient->section and defined $sender->section
+					and $validRecipient->section ne $sender->section;
+			if ($validRecipient and $validRecipient->email_address) {
+					push @recipients, $validRecipient->rfc822_mailbox;
+			}
+		}
+	}
+	return @recipients;
+}
+
+# Requires a CG object.
+# The following optional parameters may be passed:
+# set_id: A problem set name
+# problem_id: Number of a problem in the set
+# url_type:  This should a string with the value 'relative' or 'absolute' to
+# return a single URL, or undefined to return an array containing both URLs
+# this subroutine could be expanded to.
+
+sub generateURLs {
+	my $self = shift;
+	my %params = @_;
+	my $r = $self->r;
+	my $db = $r->db;
+	my $urlpath = $r->urlpath;
+	my $userName = $r->param("user");
+
+	# generate context URLs
+	my $emailableURL;
+	my $returnURL;
+	if ($userName) {
+		my $modulePath;
+		my @args;
+		if (defined $params{set_id} && $params{set_id} ne "") {
+			if ($params{problem_id}) {
+				$modulePath = $r->urlpath->newFromModule("WeBWorK::ContentGenerator::Problem", $r,
+					courseID => $r->urlpath->arg("courseID"),
+					setID => $params{set_id},
+					problemID => $params{problem_id},
+				);
+				@args = qw/displayMode showOldAnswers showCorrectAnswers showHints showSolutions/;
+			} else {
+				$modulePath = $r->urlpath->newFromModule("WeBWorK::ContentGenerator::ProblemSet", $r,
+					courseID => $r->urlpath->arg("courseID"),
+					setID => $params{set_id},
+				);
+				@args = ();
+			}
+		} else {
+			$modulePath = $r->urlpath->newFromModule("WeBWorK::ContentGenerator::ProblemSets", $r,
+				courseID => $r->urlpath->arg("courseID"),
+			);
+			@args = ();
+		}
+		$emailableURL = $self->systemLink($modulePath,
+			authen => 0,
+			params => [ "effectiveUser", @args ],
+			use_abs_url => 1,
+		);
+		$returnURL = $self->systemLink($modulePath,
+			authen => 1,
+			params => [ @args ],
+		);
+	} else {
+		$emailableURL = "(not available)";
+		$returnURL = "";
+	}
+	if ($params{url_type}) {
+		if ($params{url_type} eq 'relative') {
+			return $returnURL;
+		} else {
+			return $emailableURL; # could include other types of URL here...
+		}
+	} else {
+		return ($emailableURL, $returnURL);
+	}
+	return;
 }
 
 # This is a dummy function used to mark strings for localization

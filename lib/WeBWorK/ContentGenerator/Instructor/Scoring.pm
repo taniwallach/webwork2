@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/ContentGenerator/Instructor/Scoring.pm,v 1.62 2007/03/07 17:34:42 glarose Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -59,7 +59,8 @@ sub initialize {
 	$self->{scoringFileName}=$scoringFileName;
 	
 	$self->{padFields}  = defined($r->param('padFields') ) ? 1 : 0; 
-	
+	$self->{includePercentEachSet} = defined($r->param('includePercentEachSet') ) ? 1 : 0;
+
 	if (defined $scoreSelected && @selected && $scoringFileNameOK) {
 
 		my @totals                 = ();
@@ -111,7 +112,7 @@ sub initialize {
 				$self->appendColumns(\@totals, \@totalsColumn);
 			}	
 		}
-		my @sum_scores  = $self->sumScores(\@totals, $showIndex, \%Users, \@sortedUserIDs);
+		my @sum_scores  = $self->sumScores(\@totals, $showIndex, \%Users, \@sortedUserIDs, $self->{includePercentEachSet});
 		$self->appendColumns( \@totals,\@sum_scores);
 		$self->writeCSV("$scoringDir/$scoringFileName", @totals);
 
@@ -210,6 +211,14 @@ sub body {
 										-checked=>1,
 									  },
 									 'Pad Fields'
+						),
+						CGI::br(),
+						CGI::checkbox({ -name=>'includePercentEachSet',
+										-value=>1,
+										-label=>'Include percentage grades columns for all sets', # should use maketext and add to POT file
+										-checked=>1,
+									},
+									'Include percentage grades columns for all sets'
 						),
 					),
 				),
@@ -606,11 +615,13 @@ sub scoreSet {
 }
 
 sub sumScores {    # Create a totals column for each student
+	# Also create columns with percentage grades per assignment if requested
 	my $self        = shift;
 	my $r_totals    = shift;
 	my $showIndex   = shift;
 	my $r_users     = shift;
 	my $r_sorted_user_ids =shift;
+	my $addPercentagePerAssignmentColumns = shift;
 	my $r           = $self->r;
 	my $db          = $r->db;
 	my @scoringData = ();
@@ -629,22 +640,44 @@ sub sumScores {    # Create a totals column for each student
 		$totalPoints += ($score =~/^\s*[\d\.]+\s*$/)? $score : 0;
 	}
     foreach my $i (0..$row_count) {
+		# Skip heading rows
+		next if ( $i <= ( $problemValueRow +1 ) ); # the row after $problemValueRow has headers
     	my $studentTotal = 0;
+		my $hw_Cnum = 2; # The first 2 columns we produce will be for summary and total score from 100
 		for( my $j = $start_column;$j<=$last_column;$j+= $index_increment) {
 			my $score = $r_totals->[$i]->[$j];
 			$studentTotal += ($score =~/^\s*[\d\.]+\s*$/)? $score : 0;
-			
+			if ( $addPercentagePerAssignmentColumns ) {
+				$scoringData[$i][$hw_Cnum] = ($score) ?
+				  # Note: the multiplication by 100 is OUTSIDE the wwRound() so the computed
+				  # score is an integer percentage, just as that displayed by
+				  # lib/WeBWorK/ContentGenerator/Grades.pm as $totalRightPercent.
+				  ( 100 * wwRound( 2, $score/ ($r_totals->[$problemValueRow]->[$j]) ) ) : 0;
+				$hw_Cnum++;
+			}
 		}
 		$scoringData[$i][0] = wwRound(2,$studentTotal);
 		$scoringData[$i][1] = ($totalPoints) ?wwRound(2,100*$studentTotal/$totalPoints) : 0;
     }
-    $scoringData[0]      = ['',''];
-    $scoringData[1]      = [$r->maketext('summary'), $r->maketext('%score')];
-	$scoringData[2]      = ['',''];
-	$scoringData[3]      = ['',''];
-	$scoringData[4]      = ['',''];
-	$scoringData[6]      = ['',''];
 
+	my @HeaderRowsData0 = ('','');
+	my @HeaderRowsData1 = ($r->maketext('summary'),$r->maketext('%score'));
+	my @HeaderRowsData2 = ('','');
+	if ( $addPercentagePerAssignmentColumns ) {
+		for( my $j = $start_column;$j<=$last_column;$j+= $index_increment) {
+			push( @HeaderRowsData0 , '' );
+			push( @HeaderRowsData1 , $r_totals->[1]->[$j] ); # The assignment number
+			push( @HeaderRowsData2 , $r->maketext('%score') );
+		}
+	}
+    $scoringData[1] = [ @HeaderRowsData1 ];
+    $scoringData[6] = [ @HeaderRowsData1 ]; # Put the header in this row also
+
+	$scoringData[2] = [ @HeaderRowsData2 ];
+
+	foreach my $j ( 0 , 3 .. 5 ) {
+		$scoringData[$j] = [ @HeaderRowsData0 ];
+	}
 
 	return @scoringData;
 }
@@ -747,7 +780,7 @@ sub writeCSV {
 		rename $filename, $bakFileName or warn "Unable to rename $filename to $bakFileName";
 	}
 
-	open my $fh, ">", $filename or warn "Unable to open $filename for writing";
+	open my $fh, ">:encoding(UTF-8)", $filename or warn "Unable to open $filename for writing";
 	foreach my $row (@csv) {
 		my @rowPadded = ();
 		foreach (my $column = 0; $column < @$row; $column++) {
@@ -775,7 +808,7 @@ sub readStandardCSV {
 
 sub writeStandardCSV {
 	my ($self, $filename, @csv) = @_;
-	open my $fh, ">", $filename;
+	open my $fh, ">:encoding(UTF-8)", $filename;
 	foreach my $row (@csv) {
 		print $fh (join ",", map {$self->quote($_)} @$row);
 		print $fh "\n";

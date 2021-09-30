@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/DB/Schema/NewSQL/Std.pm,v 1.22 2009/02/02 03:18:09 gage Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -56,9 +56,10 @@ naming requirements.
 # constructor for SQL-specific behavior
 ################################################################################
 
-sub new {
+sub new {    
 	my $self = shift->SUPER::new(@_);
-	
+		# effectively calls WeBWorK::DB::Schema::new
+		
 	$self->sql_init;
 	
 	# provide a custom error handler
@@ -71,7 +72,7 @@ sub sql_init {
 	my $self = shift;
 	
 	# transformation functions for table and field names: these allow us to pass
-	# the WeBWorK table/field names to SQL::Abstract, and have it translate them
+	# the WeBWorK table/field names to SQL::Abstract::Classic, and have it translate them
 	# to the SQL table/field names from tableOverride and fieldOverride.
 	# (Without this, it would be hard to translate field names in WHERE
 	# structures, since they're so convoluted.)
@@ -111,7 +112,6 @@ sub sql_init {
 
 sub create_table {
 	my ($self) = @_;
-	
 	my $stmt = $self->_create_table_stmt;
 	$self->dbh->do($stmt);
 	my @fields = $self->fields;
@@ -126,8 +126,13 @@ sub _create_table_stmt {
 	my ($self) = @_;
 	
 	my $sql_table_name = $self->sql_table_name;
-  my $engine = $self->engine;
 	
+    # insure correct syntax if $engine or $character_set is empty. Can't have ENGINE = in mysql stmt.
+    my $engine = $self->engine;
+    my $ENGINE_CLAUSE = ($engine)? "ENGINE=$engine" : "";
+    my $character_set= $self->character_set;
+    my $CHARACTER_SET_CLAUSE = ($character_set)? "DEFAULT CHARACTER SET = $character_set": "";
+
 	my @field_list;
 	
 	# generate a column specification for each field
@@ -162,7 +167,7 @@ sub _create_table_stmt {
 	}
 	
 	my $field_string = join(", ", @field_list);
-	return "CREATE TABLE `$sql_table_name` ( $field_string ) ENGINE=$engine";
+	return "CREATE TABLE `$sql_table_name` ( $field_string ) $ENGINE_CLAUSE $CHARACTER_SET_CLAUSE";
 }
 
 ################################################################################
@@ -264,28 +269,59 @@ sub _get_db_info {
 	my $dsn = $self->{driver}{source};
 	my $username = $self->{params}{username};
 	my $password = $self->{params}{password};
-	
-	die "Can't call dump_table or restore_table on a table with a non-MySQL source"
-		unless $dsn =~ s/^dbi:mysql://i;
-	
-	# this is an internal function which we probably shouldn't be using here
-	# but it's quick and gets us what we want (FIXME what about sockets, etc?)
+
 	my %dsn;
-	DBD::mysql->_OdbcParse($dsn, \%dsn, ['database', 'host', 'port']);
+	if ($dsn =~ m/^dbi:mariadb:/i || $dsn =~ m/^dbi:mysql:/i) {
+		# Expect DBI:MariaDB:database=webwork;host=db;port=3306
+		# or DBI:mysql:database=webwork;host=db;port=3306
+		# The host and port are optional.
+		my ($dbi, $dbtype, $dsn_opts) = split(':', $dsn);
+		while (length($dsn_opts)) {
+			if ($dsn_opts =~ /^([^=]*)=([^;]*);(.*)$/) {
+				$dsn{$1} = $2;
+				$dsn_opts = $3;
+			} else {
+				my ($var, $val) = $dsn_opts =~ /^([^=]*)=([^;]*)$/;
+				$dsn{$var} = $val;
+				$dsn_opts = '';
+			}
+		}
+	} else {
+		die "Can't call dump_table or restore_table on a table with a non-MySQL/MariaDB source";
+	}
+
 	die "no database specified in DSN!" unless defined $dsn{database};
-	
+
+	my $mysqldump = $self->{params}{mysqldump_path};
+	# Conditionally add column-statistics=0 as MariaDB databases do not support it
+	# see: https://serverfault.com/questions/912162/mysqldump-throws-unknown-table-column-statistics-in-information-schema-1109
+	#      https://github.com/drush-ops/drush/issues/4410
+
+	my $column_statistics_off = "";
+	my $test_for_column_statistics = `$mysqldump --help | grep 'column-statistics'`;
+	if ( $test_for_column_statistics ) {
+		$column_statistics_off = "[mysqldump]\ncolumn-statistics=0\n";
+		#warn "Setting in the temporary mysql config file for table dump/restore:\n$column_statistics_off\n\n";
+	}
+
 	# doing this securely is kind of a hassle...
+
 	my $my_cnf = new File::Temp;
 	$my_cnf->unlink_on_destroy(1);
 	chmod 0600, $my_cnf or die "failed to chmod 0600 $my_cnf: $!"; # File::Temp objects stringify with ->filename
 	print $my_cnf "[client]\n";
+
+	# note: the quotes below are needed for special characters (and others) so they are passed to the database correctly. 
+
 	print $my_cnf "user=\"$username\"\n" if defined $username and length($username) > 0;
 	print $my_cnf "password=\"$password\"\n" if defined $password and length($password) > 0;
 	print $my_cnf "host=\"$dsn{host}\"\n" if defined $dsn{host} and length($dsn{host}) > 0;
 	print $my_cnf "port=\"$dsn{port}\"\n" if defined $dsn{port} and length($dsn{port}) > 0;
-	
+	print $my_cnf "$column_statistics_off" if $test_for_column_statistics;
+
 	return ($my_cnf, $dsn{database});
 }
+
 ####################################################
 # checking Fields
 ####################################################
@@ -326,6 +362,29 @@ sub _add_column_field_stmt {
 	my $sql_field_name = $self->sql_field_name($field_name);
 	my $sql_field_type = $self->field_data->{$field_name}{type};		
 	return "Alter table `$sql_table_name` add column `$sql_field_name` $sql_field_type";
+}
+
+####################################################
+# deleting Field column
+####################################################
+
+sub drop_column_field {
+	my $self = shift;
+	my $field_name = shift;
+	my $stmt = $self->_drop_column_field_stmt($field_name);
+	#warn "database command $stmt";
+	my $result = $self->dbh->do($stmt);
+	#warn "result of add column is $result";
+	#return  ($result eq "0E0") ? 0 : 1;    # failed result is 0E0
+	return 1;   #FIXME  how to determine if database update was successful???
+}
+
+sub _drop_column_field_stmt {
+	my $self = shift;	
+	my $field_name=shift;
+	my $sql_table_name = $self->sql_table_name;
+	my $sql_field_name = $self->sql_field_name($field_name);		
+	return "Alter table `$sql_table_name` drop column `$sql_field_name` ";
 }
 ####################################################
 # checking Tables
@@ -782,6 +841,12 @@ sub engine {
     : 'MYISAM';
 }
 
+sub character_set {
+	my $self = shift;
+	return (defined $self->{character_set} and $self->{character_set})
+		? $self->{character_set}
+		: 'latin1';
+}
 # returns non-quoted SQL name of given field
 sub sql_field_name {
 	my ($self, $field) = @_;

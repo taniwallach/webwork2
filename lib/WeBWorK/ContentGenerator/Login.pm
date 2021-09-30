@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2019 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/ContentGenerator/Login.pm,v 1.47 2012/06/08 22:59:55 wheeler Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -29,9 +29,12 @@ use warnings;
 #use CGI qw(-nosticky );
 use WeBWorK::CGI;
 use WeBWorK::Utils qw(readFile dequote jitar_id_to_seq);
+use Encode;
 
-use mod_perl;
+
 use constant MP2 => ( exists $ENV{MOD_PERL_API_VERSION} and $ENV{MOD_PERL_API_VERSION} >= 2 );
+use Encode;
+
 
 # This content generator is NOT logged in.
 # BUT one must return a 1 so that error messages can be displayed.
@@ -58,7 +61,8 @@ sub title {
 	return $r->maketext("[_1]: Problem [_2]",$setID, $problemID);
     }
 
-    return $r->urlpath->name;
+    my $ref = $self->SUPER::title();
+    return $ref;
 }
 
 sub info {
@@ -147,6 +151,13 @@ sub pre_header_initialize {
 	}
 }
 
+sub head {
+	my ($self) = @_;
+	my $ce = $self->r->ce;
+	my $contents = $ce->{options}{metaRobotsContent} // 'none';
+        print '<meta name="robots" content="'.$contents.'" />';
+        return "";
+}
 
 sub body {
 	my ($self) = @_;
@@ -185,6 +196,8 @@ sub body {
 	# us to yell at the user for doing that, since Authen isn't a content-
 	# generating module.
 	my $authen_error = MP2 ? $r->notes->get("authen_error") : $r->notes("authen_error");
+	$authen_error = Encode::decode("UTF-8",$authen_error);
+
 	if ($authen_error) {
 		print CGI::div({class=>"ResultsWithError", tabindex=>'0'},
 			CGI::p($authen_error)
@@ -192,15 +205,12 @@ sub body {
 	}
 
 	if ($externalAuth ) {
-		if ($authen_error) {
-			if ($r -> authen() eq "WeBWorK::Authen::LTIBasic") {
-				print CGI::p({}, $r->maketext('[_1] uses an external authentication system (e.g., Oncourse,  CAS,  Blackboard, Moodle, Canvas, etc.).  Please return to system you used and try again.', CGI::strong($course)));
-			} else {
-				print CGI::p({}, $r->maketext("_EXTERNAL_AUTH_MESSAGE", CGI::strong($r->maketext($course))));
-			}
+		my $LMS = ($ce->{LMS_url}) ? CGI::a({href => $ce->{LMS_url}},$ce->{LMS_name}) : $ce->{LMS_name};
+		if (!$authen_error || $r->authen() eq "WeBWorK::Authen::LTIBasic") {
+			print CGI::p($r->maketext('The course [_1] uses an external authentication system ([_2]). Please return to that system to access this course.', CGI::strong($course), $LMS));
 		} else {
-		    print CGI::p({}, $r->maketext('[_1] uses an external authentication system (e.g., Oncourse,  CAS,  Blackboard, Moodle, Canvas, etc.).  Please return to system you used and try again.', CGI::strong($course)));
-		} 
+			print CGI::p($r->maketext("_EXTERNAL_AUTH_MESSAGE", CGI::strong($course), $LMS));
+		}
 	} else {
 		print CGI::p($r->maketext("Please enter your username and password for [_1] below:", CGI::b($course)));
 		if ($ce -> {session_management_via} ne "session_cookie") {

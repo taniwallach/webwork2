@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/Authz.pm,v 1.37 2012/06/08 22:59:54 wheeler Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -485,7 +485,8 @@ sub checkSet {
 	my $LTIGradeMode = $ce->{LTIGradeMode} // '';
 
 	if ($LTIGradeMode eq 'homework' && !$self->hasPermissions($userName, "view_unopened_sets")) {
-	  return $r->maketext("You must use your Learning Managment System (E.G. Blackboard, Moodle, Canvas, etc...) to access this set.  Try logging in to the Learning Managment System and visiting the set from there.")
+		my $LMS = ($ce->{LMS_url}) ? CGI::a({href => $ce->{LMS_url}},$ce->{LMS_name}) : $ce->{LMS_name};
+		return $r->maketext("You must use your Learning Managment System ([_1]) to access this set.  Try logging in to the Learning Managment System and visiting the set from there.",$LMS)
 	    unless $set->lis_source_did;
 	}
 	

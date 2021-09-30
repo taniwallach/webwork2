@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/ContentGenerator/Grades.pm,v 1.35 2007/07/10 14:41:54 glarose Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -109,7 +109,7 @@ sub scoring_info {
 	my $header = '';
 	local(*FILE);
 	if (-e "$filePath" and -r "$filePath") {
-		open FILE, "$filePath" || return("Can't open $filePath"); 
+		open FILE, "<:encoding(UTF-8)", "$filePath" || return("Can't open $filePath"); 
 		while ($header !~ s/Message:\s*$//m and not eof(FILE)) { 
 			$header .= <FILE>; 
 		}
@@ -311,7 +311,7 @@ sub displayStudentStats {
 		     ( ! $authz->hasPermissions($r->param("user"), "view_hidden_work") &&
 		       ( $set->hide_score eq 'Y' || 
 			 ($set->hide_score eq 'BeforeAnswerDate' && time < $set->answer_date) ) ) ) {
-			push( @rows, CGI::Tr({}, CGI::td(WeBWorK::ContentGenerator::underscore2sp("${setID}_(test_" . $set->version_id . ")")), 
+			push( @rows, CGI::Tr({}, CGI::td(WeBWorK::ContentGenerator::underscore2sp("${setID}_(version_" . $set->version_id . ")")),
 					     CGI::td({colspan=>($max_problems+2)}, CGI::em($r->maketext("Display of scores for this set is not allowed.")))) );
 			next;
 		}
@@ -407,7 +407,7 @@ sub displayStudentStats {
 		# Otherwise we just add the set to the running course total
 		if ($setIsVersioned) {
 		  # prettify versioned set display
-		  $setName =~ s/(.+),v(\d+)$/${1}_(test_$2)/;
+		  $setName =~ s/(.+),v(\d+)$/${1}_(version_$2)/;
 		  my $gatewayName = $1;
 		  my $currentVersion = $2;
 
@@ -598,7 +598,7 @@ sub grade_set {
 			# now $newOrder[i] = pNum-1, where pNum is the problem
 			#    number to display in the ith position on the test
 			#    for sorting, invert this mapping:
-			my %pSort = map {($newOrder[$_]+1)=>$_} (0..$#newOrder);
+			my %pSort = map { $problemRecords[$newOrder[$_]]->problem_id => $_ } (0 .. $#newOrder);
 
 			@problemRecords = sort {$pSort{$a->problem_id} <=> $pSort{$b->problem_id}} @problemRecords;
 		}

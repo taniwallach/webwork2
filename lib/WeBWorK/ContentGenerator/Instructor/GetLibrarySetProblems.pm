@@ -1,7 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
-# $CVSHeader: webwork2/lib/WeBWorK/ContentGenerator/Instructor/SetMaker.pm,v 1.85 2008/07/01 13:18:52 glarose Exp $
+# Copyright &copy; 2000-2021 The WeBWorK Project, https://github.com/openwebwork
 # 
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of either: (a) the GNU General Public License as published by the
@@ -34,6 +33,7 @@ use WeBWorK::Debug;
 use WeBWorK::Form;
 use WeBWorK::Utils qw(readDirectory max sortByName);
 use WeBWorK::Utils::Tasks qw(renderProblems);
+use WeBWorK::Utils::LanguageAndDirection;
 use File::Find;
 
 require WeBWorK::Utils::ListingDB;
@@ -74,7 +74,7 @@ use constant MOVED => (1 << 4);
 my %problib;	## This is configured in defaults.config
 my %ignoredir = (
 	'.' => 1, '..' => 1, 'Library' => 1, 'CVS' => 1, 'tmpEdit' => 1,
-	'headers' => 1, 'macros' => 1, 'email' => 1, '.svn' => 1,
+	'headers' => 1, 'macros' => 1, 'graphics' => 1, 'email' => 1, '.svn' => 1,
 );
 
 sub prepare_activity_entry {
@@ -280,16 +280,22 @@ sub make_data_row {
 	my $isGatewaySet = ( defined($setRecord) && 
 			     $setRecord->assignment_type =~ /gateway/ );
 
+	my %problem_div_settings = (
+		-class => "RenderSolo",
+		# Add what is needed for lang and dir settings
+		get_problem_lang_and_dir($pg->{flags}, $self->r->ce->{perProblemLangAndDirSettingMode}, $self->r->ce->{language})
+	);
+
 	my $problem_output = $pg->{flags}->{error_flag} ?
 		CGI::div({class=>"ResultsWithError"}, CGI::em("This problem produced an error"))
-		: CGI::div({class=>"RenderSolo"}, $pg->{body_text});
+		: CGI::div( \%problem_div_settings, $pg->{body_text});
 	$problem_output .= $pg->{flags}->{comment} if($pg->{flags}->{comment});
 
 
 	#if($self->{r}->param('browse_which') ne 'browse_npl_library') {
 	my $problem_seed = $self->{'problem_seed'} || 1234;
 	my $edit_link = CGI::a({href=>$self->systemLink(
-		 $urlpath->newFromModule("WeBWorK::ContentGenerator::Instructor::PGProblemEditor2",
+		 $urlpath->newFromModule("WeBWorK::ContentGenerator::Instructor::PGProblemEditor",
 			  courseID =>$urlpath->arg("courseID"),
 			  setID=>"Undefined_Set",
 			  problemID=>"1"),
@@ -593,8 +599,7 @@ sub pre_header_initialize {
 			debug("new value of local_sets is ", $r->param('local_sets'));
 			my $newSetRecord	 = $db->getGlobalSet($newSetName);
 			if (defined($newSetRecord)) {
-	            $self->addbadmessage("The set name $newSetName is already in use.  
-	            Pick a different name if you would like to start a new set.");
+		            $self->addbadmessage($r->maketext("The set name '[_1]' is already in use.  Pick a different name if you would like to start a new set.",$newSetName));
 			} else {			# Do it!
 				# DBFIXME use $db->newGlobalSet
 				$newSetRecord = $db->{set}->{record}->new();
@@ -605,7 +610,7 @@ sub pre_header_initialize {
 				
 				my $dueDate = time+2*60*60*24*7;
 				my $display_tz = $ce->{siteDefaults}{timezone};
-				my $fDueDate = $self->formatDateTime($dueDate, $display_tz);
+				my $fDueDate = $self->formatDateTime($dueDate, $display_tz, "%m/%d/%Y at %I:%M%P");
 				my $dueTime = $ce->{pg}{timeAssignDue};
 				
 				# We replace the due time by the one from the config variable

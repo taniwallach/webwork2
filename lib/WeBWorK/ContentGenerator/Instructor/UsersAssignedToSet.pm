@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/ContentGenerator/Instructor/UsersAssignedToSet.pm,v 1.23 2006/09/25 22:14:53 sh002i Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -149,7 +149,7 @@ sub body {
 
 	# there are two set detail pages.  If we were sent here from the second one
 	# there will be a parameter we can use to get back to that one from these links
-	my $detailPageType = 'instructor_set_detail2';
+	my $detailPageType = 'instructor_set_detail';
        	$detailPageType = $r->param('pageVersion') if ($r->param('pageVersion'));
 
 	foreach my $userRecord (@userRecords) {

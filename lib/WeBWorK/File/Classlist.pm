@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/File/Classlist.pm,v 1.10 2007/08/13 22:59:58 sh002i Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -91,7 +91,7 @@ sub parse_classlist($) {
 sub write_classlist($@) {
 	my ($file, @records) = @_;
 	
-	my $fh = new IO::File($file, ">")
+	my $fh = new IO::File($file, '>:encoding(UTF-8)')
 		or die "Failed to open classist '$file' for writing: $!\n";
 	
 	my $csv = Text::CSV->new({ binary => 1});

@@ -1,7 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
-# $CVSHeader: webwork2/lib/WeBWorK/ContentGenerator/renderViaXMLRPC.pm,v 1.1 2010/05/11 15:27:08 gage Exp $
+# Copyright &copy; 2000-2021 The WeBWorK Project, https://github.com/openwebwork
 # 
 # This program is free software; you can redistribute it and/or modify it under
 # the terms of either: (a) the GNU General Public License as published by the
@@ -27,7 +26,7 @@ use warnings;
 package WeBWorK::ContentGenerator::renderViaXMLRPC;
 use base qw(WeBWorK::ContentGenerator);
 
-#use Crypt::SSLeay;
+
 #use XMLRPC::Lite;
 #use MIME::Base64 qw( encode_base64 decode_base64);
 
@@ -40,23 +39,23 @@ use CGI;
 
 =head1 Description
 
+ renderViaXMLRPC -- a front end for the Webservice that accepts HTML forms
 
-#################################################
-  renderViaXMLRPC -- a front end for the Webservice that accepts HTML forms
-
-  receives WeBWorK problems presented as HTML forms,
-  packages the form variables into an XML_RPC request
+ receives WeBWorK problems presented as HTML forms,
+ packages the form variables into an XML_RPC request
  suitable for the Webservice/RenderProblem.pm
  takes the answer returned by the webservice (which has HTML format) and 
  returns it to the browser.
-#################################################
 
 =cut
  
 # To configure the target webwork server two URLs are required
-# 1. $XML_URL   http://test.webwork.maa.org/mod_xmlrpc
+# 1.  The url  http://test.webwork.maa.org/mod_xmlrpc
 #    points to the Webservice.pm and Webservice/RenderProblem modules
-#    Is used by the client to send the original XML request to the webservice
+#    Is used by the client to send the original XML request to the webservice.
+#    It is constructed in WebworkClient::xmlrpcCall() from the value of $webworkClient->site_url which does 
+#    NOT have the mod_xmlrpc segment (it should be   http://test.webwork.maa.org) 
+#    and the constant  REQUEST_URI defined in WebworkClient.pm to be mod_xmlrpc.  
 #
 # 2. $FORM_ACTION_URL      http:http://test.webwork.maa.org/webwork2/html2xml
 #    points to the renderViaXMLRPC.pm module.
@@ -111,14 +110,14 @@ unless ($server_root_url) {
 # child
 ############################
 
-our ($XML_URL,$FORM_ACTION_URL, $XML_PASSWORD, $XML_COURSE);
+our ($SITE_URL,$FORM_ACTION_URL, $XML_PASSWORD, $XML_COURSE);
 
 	$XML_PASSWORD     	 =  'xmlwebwork';
 	$XML_COURSE          =  'daemon_course';
 
 
 
-	$XML_URL             =  "$server_root_url";  #"$server_root_url/mod_xmlrpc";
+	$SITE_URL             =  "$server_root_url"; 
 	$FORM_ACTION_URL     =  "$server_root_url/webwork2/html2xml";
 
 
@@ -144,8 +143,10 @@ sub pre_header_initialize {
 	$inputs_ref{course_password} = $inputs_ref{custom_course_password} if $inputs_ref{custom_course_password};
 	$inputs_ref{answersSubmitted} = $inputs_ref{custom_answerssubmitted} if $inputs_ref{custom_answerssubmitted};
 	$inputs_ref{problemSeed} = $inputs_ref{custom_problemseed} if $inputs_ref{custom_problemseed};
+	$inputs_ref{problemUUID} = $inputs_ref{problemUUID}//$inputs_ref{problemIdentifierPrefix}; # earlier version of problemUUID
 	$inputs_ref{sourceFilePath} = $inputs_ref{custom_sourcefilepath} if $inputs_ref{custom_sourcefilepath};
 	$inputs_ref{outputformat} = $inputs_ref{custom_outputformat} if $inputs_ref{custom_outputformat};
+	
 	
 	my $user_id      = $inputs_ref{userID};
 	my $courseName   = $inputs_ref{courseID};
@@ -171,7 +172,7 @@ sub pre_header_initialize {
     my $xmlrpc_client = new WebworkClient;
 
 	$xmlrpc_client ->encoded_source($r->param('problemSource')) ; # this source has already been encoded
-	$xmlrpc_client-> url($XML_URL);
+	$xmlrpc_client-> site_url($SITE_URL);
 	$xmlrpc_client->{form_action_url} = $FORM_ACTION_URL;
 	$xmlrpc_client->{userID}          = $inputs_ref{userID};
 	$xmlrpc_client->{course_password} = $inputs_ref{course_password};
@@ -182,6 +183,8 @@ sub pre_header_initialize {
 	$xmlrpc_client->{sourceFilePath}  = $inputs_ref{sourceFilePath};
 	$xmlrpc_client->{inputs_ref} = \%inputs_ref;  # contains form data
 	# print STDERR WebworkClient::pretty_print($r->{paramcache});
+
+	$self->{wantsjson} = 1 if $inputs_ref{outputformat} eq 'json' || $inputs_ref{send_pg_flags};
 	
 	##############################
 	# xmlrpc_client calls webservice to have problem rendered
@@ -204,6 +207,7 @@ sub content {
    # Return content of rendered problem to the browser that requested it
    ###########################
 	my $self = shift;
+	$self->{r}->content_type("application/json; charset=utf-8") if $self->{wantsjson};
 	print $self->{output};
 }
 

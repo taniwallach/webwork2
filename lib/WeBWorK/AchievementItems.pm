@@ -1,6 +1,6 @@
 ################################################################################
 # WeBWorK Online Homework Delivery System
-# Copyright © 2000-2007 The WeBWorK Project, http://openwebwork.sf.net/
+# Copyright &copy; 2000-2018 The WeBWorK Project, http://openwebwork.sf.net/
 # $CVSHeader: webwork2/lib/WeBWorK/PG.pm,v 1.76 2009/07/18 02:52:51 gage Exp $
 # 
 # This program is free software; you can redistribute it and/or modify it under
@@ -17,10 +17,10 @@
 package WeBWorK::AchievementItems;
 use base qw(WeBWorK);
 
+use WeBWorK::Utils qw(nfreeze_base64 thaw_base64);
+
 use strict;
 use warnings;
-
-use Storable qw(nfreeze thaw);
 
 # have to add any new items to this list, furthermore
 # the elements of this list have to match the class name/id of the
@@ -70,12 +70,12 @@ sub UserItems {
     
     return unless ($globalUserAchievement->frozen_hash);
 
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
     my @items;
 
     # ugly eval to get a new item object for each type of item.  
     foreach my $item (@{+ITEMS}) {
-	push (@items, eval("WeBWorK::AchievementItems::${item}->new")) if
+	push (@items, [eval("WeBWorK::AchievementItems::${item}->new"),$globalData->{$item}]) if
 	    ($globalData->{$item});
     }
 
@@ -86,8 +86,8 @@ sub UserItems {
 
 package WeBWorK::AchievementItems::ResurrectHW;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -114,11 +114,16 @@ sub print_form {
     my @openSetCount;
     my $maxProblems=0;
 
-    #Find all of the closed sets and put them in form
+    #Find all of the closed sets or sets that are past their reduced scoring date and put them in form
 
     for (my $i=0; $i<=$#$sets; $i++) {
 	if (after($$sets[$i]->due_date()) & $$sets[$i]->assignment_type eq "default") {
 	    push(@openSets,$$sets[$i]->set_id);
+	}
+	elsif (defined($$sets[$i]->reduced_scoring_date())) {
+		if (after($$sets[$i]->reduced_scoring_date()) & $$sets[$i]->assignment_type eq "default") {
+			push(@openSets,$$sets[$i]->set_id);
+		}
 	}
     }
 
@@ -139,7 +144,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -152,7 +157,8 @@ sub use_item {
     return "Couldn't find that set!" unless
 	($set);
 
-    # Set a new close date and answer time for the student and remove the item
+    # Set a new reduced scoring date, close date, and answer date for the student; remove the item
+    $set->reduced_scoring_date(time()+86400);
     $set->due_date(time()+86400);
     $set->answer_date(time()+86400);
 
@@ -166,8 +172,8 @@ sub use_item {
 	$db->putUserProblem($problem);
     }
 
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -177,8 +183,8 @@ sub use_item {
 
 package WeBWorK::AchievementItems::ExtendDueDate;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -229,7 +235,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -243,14 +249,15 @@ sub use_item {
 	($set);
     my $userSet = $db->getUserSet($userName,$setID);
     
-    #add time to the due date and answer date and remove item from inventory
+    #add time to the reduced scoring date, due date, and answer date; remove item from inventory
+    $userSet->reduced_scoring_date($set->reduced_scoring_date()+86400) if defined($set->reduced_scoring_date()) && $set->reduced_scoring_date();
     $userSet->due_date($set->due_date()+86400);
     $userSet->answer_date($set->answer_date()+86400);
 
     $db->putUserSet($userSet);
 	
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -260,8 +267,8 @@ sub use_item {
 
 package WeBWorK::AchievementItems::SuperExtendDueDate;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -312,7 +319,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -326,14 +333,15 @@ sub use_item {
 	($set);
     my $userSet = $db->getUserSet($userName,$setID);
     
-    #add time to the due date and answer date and remove item from inventory
+    #add time to the reduced scoring date, due date, and answer date; remove item from inventory
+    $userSet->reduced_scoring_date($set->reduced_scoring_date()+172800) if defined($set->reduced_scoring_date()) && $set->reduced_scoring_date();
     $userSet->due_date($set->due_date()+172800);
     $userSet->answer_date($set->answer_date()+172800);
 
     $db->putUserSet($userSet);
 	
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -343,8 +351,8 @@ sub use_item {
 
 package WeBWorK::AchievementItems::ReducedCred;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -400,7 +408,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "This item won't work unless your instructor enables the reduced scoring feature.  Let them know that you recieved this message." unless $ce->{pg}{ansEvalDefaults}{reducedScoringPeriod};
 	
@@ -427,8 +435,8 @@ sub use_item {
 
     $db->putUserSet($userSet);
 	
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -438,8 +446,8 @@ sub use_item {
 
 package WeBWorK::AchievementItems::DoubleSet;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -491,7 +499,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -515,8 +523,8 @@ sub use_item {
 	$db->putUserProblem($problem);
     }
 	
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -525,8 +533,8 @@ sub use_item {
 #Item to reset number of incorrect attempts.
 package WeBWorK::AchievementItems::ResetIncorrectAttempts;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -604,7 +612,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -626,8 +634,8 @@ sub use_item {
 
     $db->putUserProblem($problem);
 	
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -636,8 +644,8 @@ sub use_item {
 #Item to make a problem worth double.  
 package WeBWorK::AchievementItems::DoubleProb;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -716,7 +724,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -739,8 +747,8 @@ sub use_item {
     $problem->value($globalproblem->value*2);
     $db->putUserProblem($problem);
 
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -749,8 +757,8 @@ sub use_item {
 #Item to give half credit on a single problem.
 package WeBWorK::AchievementItems::HalfCreditProb;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -829,7 +837,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -855,8 +863,8 @@ sub use_item {
 
     $db->putUserProblem($problem);
 	
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -865,8 +873,8 @@ sub use_item {
 #Item to give half credit on all problems in a homework set.
 package WeBWorK::AchievementItems::HalfCreditSet;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -917,7 +925,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -945,8 +953,8 @@ sub use_item {
 	$db->putUserProblem($problem);
     }
     
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -955,8 +963,8 @@ sub use_item {
 #Item to give full credit on a single problem
 package WeBWorK::AchievementItems::FullCreditProb;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -1034,7 +1042,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -1056,8 +1064,8 @@ sub use_item {
 
     $db->putUserProblem($problem);
 	
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -1066,8 +1074,8 @@ sub use_item {
 #Item to give half credit on all problems in a homework set.
 package WeBWorK::AchievementItems::FullCreditSet;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -1118,7 +1126,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -1141,8 +1149,8 @@ sub use_item {
 	$db->putUserProblem($problem);
     }
     
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -1151,8 +1159,8 @@ sub use_item {
 #Item to turn one problem into another problem
 package WeBWorK::AchievementItems::DuplicateProb;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -1237,7 +1245,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -1266,8 +1274,8 @@ sub use_item {
 
     $db->putUserProblem($problem2);
 	
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     return;
@@ -1276,8 +1284,8 @@ sub use_item {
 #Item to print a suprise message
 package WeBWorK::AchievementItems::Surprise;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -1328,8 +1336,8 @@ sub use_item {
 #Item to allow students to take an addition test
 package WeBWorK::AchievementItems::AddNewTestGW;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -1397,7 +1405,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -1417,8 +1425,8 @@ sub use_item {
     
     $db->putUserSet($userSet);
     
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
 
     
@@ -1429,8 +1437,8 @@ sub use_item {
 #Item to extend the due date on a gateway 
 package WeBWorK::AchievementItems::ExtendDueDateGW;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -1498,7 +1506,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -1512,26 +1520,28 @@ sub use_item {
 	($set);
     my $userSet = $db->getUserSet($userName,$setID);
     
-    #add time to the due date and answer date
+    #add time to the reduced scoring date, due date, and answer date
+    $userSet->reduced_scoring_date($set->reduced_scoring_date()+86400) if defined($set->reduced_scoring_date()) && $set->reduced_scoring_date();
     $userSet->due_date($set->due_date()+86400);
     $userSet->answer_date($set->answer_date()+86400);
 
     $db->putUserSet($userSet);
 
-    #add time to the due date and answer date of verious verisons
+    #add time to the reduced scoring date, due date, and answer date of various versions
     my @versions = $db->listSetVersions($userName,$setID);
 
     foreach my $version (@versions) {
 
 	$set = $db->getSetVersion($userName,$setID,$version);
+	$set->reduced_scoring_date($set->reduced_scoring_date()+86400) if defined($set->reduced_scoring_date()) && $set->reduced_scoring_date();
 	$set->due_date($set->due_date()+86400);
 	$set->answer_date($set->answer_date()+86400);
 	$db->putSetVersion($set);
 
     }
     
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
     
     return;
@@ -1540,8 +1550,8 @@ sub use_item {
 #Item to extend the due date on a gateway 
 package WeBWorK::AchievementItems::ResurrectGW;
 our @ISA = qw(WeBWorK::AchievementItems);
-use Storable qw(nfreeze thaw);
-use WeBWorK::Utils qw(sortByName before after between x);
+
+use WeBWorK::Utils qw(sortByName before after between x nfreeze_base64 thaw_base64);
 
 sub new {
     my $class = shift;
@@ -1599,7 +1609,7 @@ sub use_item {
     my $globalUserAchievement = $db->getGlobalUserAchievement($userName);
     return "No achievement data?!?!?!" 
 	unless ($globalUserAchievement->frozen_hash);
-    my $globalData = thaw($globalUserAchievement->frozen_hash);
+    my $globalData = thaw_base64($globalUserAchievement->frozen_hash);
 
     return "You are $self->{id} trying to use an item you don't have" unless
 	($globalData->{$self->{id}});
@@ -1612,14 +1622,15 @@ sub use_item {
     return "Couldn't find that set!" unless
 	($set);
     
-    #add time to the due date and answer date and remove item from inventory
+    #add time to the reduced scoring date, due date, and answer date; remove item from inventory
+    $set->reduced_scoring_date(time()+86400) if defined($set->reduced_scoring_date()) && $set->reduced_scoring_date();
     $set->due_date(time()+86400);
     $set->answer_date(time()+86400);
 
     $db->putUserSet($set);
 	
-    $globalData->{$self->{id}} = 0;
-    $globalUserAchievement->frozen_hash(nfreeze($globalData));
+    $globalData->{$self->{id}}--;
+    $globalUserAchievement->frozen_hash(nfreeze_base64($globalData));
     $db->putGlobalUserAchievement($globalUserAchievement);
     
     return;
